@@ -102,8 +102,7 @@ fun HomeScreen(navController: NavController) {
                                 launch {
                                     val device = DeviceInfoCollector.collect(context)
                                     val xlat = app.sessionRepository.getXlatSummary(session.id)
-                                    val serverUrl = "http://${endpoint.hostname}:${endpoint.httpPort}"
-                                    val status = uploadReport(session, device, xlat, serverUrl)
+                                    val status = uploadReport(session, device, xlat, endpoint.baseUrl)
                                     app.setUploadStatus(session.id, status)
                                 }
                                 navController.navigate("results/${session.id}")

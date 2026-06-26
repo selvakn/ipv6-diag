@@ -78,6 +78,7 @@ class SessionRepository(private val db: AppDatabase) {
                     httpPort = 80,
                     httpsPort = 443,
                     isDefault = true,
+                    useHttps = true,
                 ).toEntity()
             )
         }

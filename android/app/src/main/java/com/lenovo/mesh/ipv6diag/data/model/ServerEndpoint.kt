@@ -12,4 +12,7 @@ data class ServerEndpoint(
     val httpsPort: Int = 443,
     val isDefault: Boolean = false,
     val lastVerified: Long? = null,
-)
+    val useHttps: Boolean = false,
+) {
+    val baseUrl: String get() = if (useHttps) "https://$hostname" else "http://$hostname:$httpPort"
+}

@@ -25,6 +25,12 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE server_endpoints ADD COLUMN use_https INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 @Database(
     entities = [
         DiagnosticSessionEntity::class,
@@ -32,7 +38,7 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         ServerEndpointEntity::class,
         XlatSummaryEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -51,7 +57,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "ipv6diag.db",
-                ).addMigrations(MIGRATION_1_2).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
             }
     }
 }

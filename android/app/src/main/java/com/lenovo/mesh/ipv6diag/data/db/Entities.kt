@@ -29,11 +29,12 @@ data class ServerEndpointEntity(
     @ColumnInfo(name = "https_port") val httpsPort: Int = 443,
     @ColumnInfo(name = "is_default") val isDefault: Boolean = false,
     @ColumnInfo(name = "last_verified") val lastVerified: Long? = null,
+    @ColumnInfo(name = "use_https") val useHttps: Boolean = false,
 ) {
-    fun toModel() = ServerEndpoint(id, hostname, ipv4Address, ipv6Address, httpPort, httpsPort, isDefault, lastVerified)
+    fun toModel() = ServerEndpoint(id, hostname, ipv4Address, ipv6Address, httpPort, httpsPort, isDefault, lastVerified, useHttps)
 }
 
-fun ServerEndpoint.toEntity() = ServerEndpointEntity(id, hostname, ipv4Address, ipv6Address, httpPort, httpsPort, isDefault, lastVerified)
+fun ServerEndpoint.toEntity() = ServerEndpointEntity(id, hostname, ipv4Address, ipv6Address, httpPort, httpsPort, isDefault, lastVerified, useHttps)
 
 @Entity(
     tableName = "diagnostic_sessions",
