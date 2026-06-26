@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPv6 Diagnostic Dashboard</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #f5f5f5; color: #212121; }
+  header { background: #1565C0; color: #fff; padding: 14px 20px; }
+  header h1 { font-size: 1.2rem; font-weight: 600; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; padding: 14px 20px; background: #fff; border-bottom: 1px solid #e0e0e0; }
+  .toolbar input, .toolbar button { padding: 7px 12px; border: 1px solid #bdbdbd; border-radius: 4px; font-size: 0.9rem; }
+  .toolbar button { background: #1565C0; color: #fff; border-color: #1565C0; cursor: pointer; }
+  .toolbar button:hover { background: #0d47a1; }
+  .toolbar label { font-size: 0.85rem; color: #616161; align-self: center; }
+  #content { padding: 20px; }
+  table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+  th { background: #e3f2fd; text-align: left; padding: 10px 14px; font-size: 0.85rem; color: #1565C0; }
+  td { padding: 10px 14px; border-top: 1px solid #f0f0f0; font-size: 0.9rem; }
+  tr:hover td { background: #f9f9f9; cursor: pointer; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+  .badge-pass { background: #e8f5e9; color: #2e7d32; }
+  .badge-fail { background: #ffebee; color: #c62828; }
+  .empty { text-align: center; padding: 40px; color: #9e9e9e; }
+  /* Detail view */
+  #detail { display: none; }
+  .back-btn { background: none; border: none; color: #1565C0; cursor: pointer; font-size: 0.95rem; padding: 0 0 14px 0; display: flex; align-items: center; gap: 6px; }
+  .section { background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 16px; }
+  .section-title { padding: 12px 16px; font-weight: 600; background: #e3f2fd; color: #1565C0; border-radius: 6px 6px 0 0; font-size: 0.9rem; }
+  .kv-row { display: flex; border-top: 1px solid #f0f0f0; }
+  .kv-key { padding: 8px 14px; font-size: 0.85rem; color: #616161; min-width: 200px; }
+  .kv-val { padding: 8px 14px; font-size: 0.85rem; word-break: break-all; }
+  .test-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-top: 1px solid #f0f0f0; font-size: 0.85rem; }
+  .test-name { color: #424242; }
+  .status-pass { color: #2e7d32; font-weight: 600; }
+  .status-fail { color: #c62828; font-weight: 600; }
+  .status-skip { color: #9e9e9e; }
+  .status-abrt { color: #e65100; font-weight: 600; }
+  .spinner { text-align: center; padding: 40px; color: #9e9e9e; }
+</style>
+</head>
+<body>
+<header><h1>IPv6 Diagnostic Dashboard</h1></header>
+
+<div class="toolbar">
+  <label>From</label>
+  <input type="date" id="from">
+  <label>To</label>
+  <input type="date" id="to">
+  <label>Device</label>
+  <input type="text" id="device" placeholder="filter by device name">
+  <button onclick="applyFilters()">Filter</button>
+  <button onclick="clearFilters()" style="background:#757575;border-color:#757575">Clear</button>
+</div>
+
+<div id="content">
+  <div id="list-view">
+    <div class="spinner">Loading…</div>
+  </div>
+  <div id="detail-view" style="display:none"></div>
+</div>
+
+<script>
+let allReports = [];
+
+async function loadReports(from, to, device) {
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (device) params.set('device', device);
+  const r = await fetch('/reports?' + params);
+  const data = await r.json();
+  return data.reports || [];
+}
+
+function renderList(reports) {
+  const view = document.getElementById('list-view');
+  document.getElementById('detail-view').style.display = 'none';
+  view.style.display = '';
+
+  if (!reports.length) {
+    view.innerHTML = '<div class="empty">No reports found.</div>';
+    return;
+  }
+  const rows = reports.map(r => {
+    const pct = r.total_count > 0 ? Math.round(r.pass_count / r.total_count * 100) : 0;
+    const cls = pct === 100 ? 'badge-pass' : 'badge-fail';
+    const date = new Date(r.run_timestamp).toLocaleString();
+    return `<tr onclick="showDetail('${r.id}')">
+      <td>${esc(r.device_name)}</td>
+      <td>${esc(r.device_model)}</td>
+      <td>${date}</td>
+      <td><span class="badge ${cls}">${r.pass_count}/${r.total_count}</span></td>
+    </tr>`;
+  }).join('');
+  view.innerHTML = `<table>
+    <thead><tr><th>Device</th><th>Model</th><th>Run Time</th><th>Results</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+async function showDetail(id) {
+  const listView = document.getElementById('list-view');
+  const detailView = document.getElementById('detail-view');
+  listView.style.display = 'none';
+  detailView.style.display = '';
+  detailView.innerHTML = '<div class="spinner">Loading…</div>';
+
+  const r = await fetch('/reports/' + id);
+  const d = await r.json();
+
+  const net = d.network || {};
+  const tests = d.test_results || [];
+  const xlat = d.xlat_summary;
+
+  const statusClass = s => ({PASS:'status-pass',FAIL:'status-fail',SKIPPED:'status-skip',ABORTED:'status-abrt'}[s]||'');
+
+  const testRows = tests.map(t =>
+    `<div class="test-row">
+      <span class="test-name">[${t.testType}] ${t.addressFamily}</span>
+      <span class="${statusClass(t.status)}">${t.status}${t.latencyMs!=null?' · '+t.latencyMs+'ms':''}</span>
+    </div>`
+  ).join('') || '<div class="test-row" style="color:#9e9e9e">No tests</div>';
+
+  let xlatHtml = '<div class="test-row" style="color:#9e9e9e">Not available</div>';
+  if (xlat && xlat.overallStatus) {
+    const subTests = [
+      ['NAT64 Prefix', xlat.nat64Prefix],
+      ['DNS64 Validation', xlat.dns64Validation],
+      ['CLAT Quality', xlat.clatQuality],
+      ['PLAT Verification', xlat.platVerification],
+    ];
+    xlatHtml = `<div class="test-row"><span>Overall chain</span><span class="${statusClass(xlat.overallStatus)}">${xlat.overallStatus}</span></div>`
+      + subTests.map(([name, sub]) => sub
+        ? `<div class="test-row"><span>${name}</span><span class="${statusClass(sub.status)}">${sub.status}</span></div>`
+        : '').join('');
+  }
+
+  detailView.innerHTML = `
+    <button class="back-btn" onclick="backToList()">&#8592; Back to list</button>
+
+    <div class="section">
+      <div class="section-title">Device</div>
+      ${kv('Name', d.device_name)}${kv('Model', d.device_model)}${kv('Manufacturer', d.device_manufacturer)}${kv('Android Version', d.android_version)}${kv('Device ID', d.device_id)}
+      ${kv('Uploaded', new Date(d.uploaded_at).toLocaleString())}${kv('Run at', new Date(d.run_timestamp).toLocaleString())}
+    </div>
+
+    <div class="section">
+      <div class="section-title">Network</div>
+      ${kv('Interface', net.cellularInterfaceName||'—')}${kv('IPv4', net.cellularIPv4Address||'—')}
+      ${kv('IPv6', (net.cellularIPv6Addresses||[]).join(', ')||'—')}
+      ${kv('Native IPv6', net.hasNativeIPv6?'Yes':'No')}
+      ${kv('CLAT / 464XLAT', net.clatPresent?'Present ('+net.clatInterfaceName+')':'Not detected')}
+      ${kv('DNS Servers', (net.dnsServers||[]).join(', ')||'—')}
+      ${kv('Android API', net.apiLevel||'—')}
+    </div>
+
+    <div class="section">
+      <div class="section-title">Test Results (${d.pass_count}/${d.total_count} passed)</div>
+      ${testRows}
+    </div>
+
+    <div class="section">
+      <div class="section-title">464XLAT Diagnostics</div>
+      ${xlatHtml}
+    </div>`;
+}
+
+function backToList() {
+  document.getElementById('detail-view').style.display = 'none';
+  document.getElementById('list-view').style.display = '';
+}
+
+function kv(k, v) {
+  return `<div class="kv-row"><span class="kv-key">${k}</span><span class="kv-val">${esc(String(v))}</span></div>`;
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function applyFilters() {
+  const from = document.getElementById('from').value;
+  const to = document.getElementById('to').value;
+  const device = document.getElementById('device').value.trim();
+  loadReports(from, to, device).then(renderList);
+}
+
+function clearFilters() {
+  document.getElementById('from').value = '';
+  document.getElementById('to').value = '';
+  document.getElementById('device').value = '';
+  loadReports('','','').then(renderList);
+}
+
+// Initial load
+loadReports('','','').then(reports => { allReports = reports; renderList(reports); });
+</script>
+</body>
+</html>

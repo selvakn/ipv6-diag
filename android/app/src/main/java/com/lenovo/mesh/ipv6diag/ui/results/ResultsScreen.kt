@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import androidx.compose.runtime.collectAsState
 import com.lenovo.mesh.ipv6diag.IPv6DiagApplication
 import com.lenovo.mesh.ipv6diag.data.model.DiagnosticSession
 import com.lenovo.mesh.ipv6diag.data.model.TestResult
@@ -48,6 +49,7 @@ import com.lenovo.mesh.ipv6diag.data.model.XlatChainStatus
 import com.lenovo.mesh.ipv6diag.data.model.XlatDiagnosticSummary
 import com.lenovo.mesh.ipv6diag.data.model.XlatSubTestStatus
 import com.lenovo.mesh.ipv6diag.export.SessionExporter
+import com.lenovo.mesh.ipv6diag.upload.UploadStatus
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,6 +60,8 @@ fun ResultsScreen(sessionId: String, navController: NavController) {
     val scope = rememberCoroutineScope()
     var session by remember { mutableStateOf<DiagnosticSession?>(null) }
     var xlatSummary by remember { mutableStateOf<XlatDiagnosticSummary?>(null) }
+    val uploadStatusMap by app.uploadStatus.collectAsState()
+    val uploadStatus = uploadStatusMap[sessionId] ?: UploadStatus.Idle
 
     LaunchedEffect(sessionId) {
         session = app.sessionRepository.getSessionById(sessionId)
@@ -94,6 +98,16 @@ fun ResultsScreen(sessionId: String, navController: NavController) {
                 }
                 val passed = s.testResults.count { it.status == TestStatus.PASS }
                 Text("${passed}/${s.testResults.size} tests passed", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(4.dp))
+                val (uploadLabel, uploadColor) = when (uploadStatus) {
+                    is UploadStatus.Idle -> "" to Color.Transparent
+                    is UploadStatus.Uploading -> "Uploading…" to Color(0xFF1565C0)
+                    is UploadStatus.Success -> "Uploaded ✓" to Color(0xFF388E3C)
+                    is UploadStatus.Failed -> "Upload failed: ${uploadStatus.reason}" to Color(0xFFD32F2F)
+                }
+                if (uploadLabel.isNotEmpty()) {
+                    Text(uploadLabel, color = uploadColor, style = MaterialTheme.typography.bodySmall)
+                }
                 Spacer(Modifier.height(8.dp))
             }
 

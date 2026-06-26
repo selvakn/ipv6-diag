@@ -33,9 +33,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.lenovo.mesh.ipv6diag.IPv6DiagApplication
+import com.lenovo.mesh.ipv6diag.diagnostic.DeviceInfoCollector
 import com.lenovo.mesh.ipv6diag.diagnostic.DiagnosticRunner
 import com.lenovo.mesh.ipv6diag.diagnostic.NetworkInfoCollector
 import com.lenovo.mesh.ipv6diag.diagnostic.TestFilter
+import com.lenovo.mesh.ipv6diag.upload.UploadStatus
+import com.lenovo.mesh.ipv6diag.upload.uploadReport
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,6 +97,15 @@ fun HomeScreen(navController: NavController) {
                                     return@launch
                                 }
                                 val session = runner.runTests(endpoint, selectedFilter)
+                                // Auto-upload: mark uploading, then fire-and-forget
+                                app.setUploadStatus(session.id, UploadStatus.Uploading)
+                                launch {
+                                    val device = DeviceInfoCollector.collect(context)
+                                    val xlat = app.sessionRepository.getXlatSummary(session.id)
+                                    val serverUrl = "http://${endpoint.hostname}:${endpoint.httpPort}"
+                                    val status = uploadReport(session, device, xlat, serverUrl)
+                                    app.setUploadStatus(session.id, status)
+                                }
                                 navController.navigate("results/${session.id}")
                             } catch (e: Exception) {
                                 snackbar.showSnackbar(e.message ?: "Test failed")
