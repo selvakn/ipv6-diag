@@ -135,6 +135,23 @@ async function showDetail(id) {
       + subTests.map(([name, sub]) => sub
         ? `<div class="test-row"><span>${name}</span><span class="${statusClass(sub.status)}">${sub.status}</span></div>`
         : '').join('');
+
+    // Server-assisted observation: what the server saw on the forced-IPv4 (CLAT) path.
+    const obs = xlat.serverObservation;
+    if (obs && obs.status) {
+      const verdict = obs.translationDetected
+        ? '<span class="status-pass">464XLAT confirmed</span>'
+        : (obs.status === 'PASS'
+            ? '<span class="status-skip">no translation</span>'
+            : `<span class="${statusClass(obs.status)}">${obs.status}</span>`);
+      xlatHtml += `<div class="test-row"><span>Server-observed source</span>${verdict}</div>`;
+      if (obs.serverObservedSource) {
+        xlatHtml += `<div class="test-row" style="color:#9e9e9e"><span style="padding-left:14px">&#8627; saw ${esc(obs.observedFamily||'')} ${esc(obs.serverObservedSource)}</span><span></span></div>`;
+      }
+      if (obs.decodedEmbeddedIPv4) {
+        xlatHtml += `<div class="test-row" style="color:#9e9e9e"><span style="padding-left:14px">&#8627; embedded IPv4 ${esc(obs.decodedEmbeddedIPv4)}</span><span></span></div>`;
+      }
+    }
   }
 
   detailView.innerHTML = `

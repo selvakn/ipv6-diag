@@ -16,42 +16,41 @@ suspend fun runXlatDiagnostics(
     serverIPv6: String?,
     serverPort: Int,
 ): XlatDiagnosticSummary {
-    // Short-circuit: no CLAT interface → ABSENT
-    if (!networkInfo.clatPresent) {
-        val skipped = com.lenovo.mesh.ipv6diag.data.model.NAT64PrefixResult(
-            entries = emptyList(), preferredPrefix = null, status = XlatSubTestStatus.SKIPPED,
-            failureReason = "no CLAT interface — 464XLAT not present"
+    // NAT64/DNS64 are network-level facts: discover them regardless of whether a
+    // device-side CLAT interface was detected. The PLAT/NAT64 infrastructure can be
+    // present even when CLAT detection is unreliable (common on API 30+).
+    val nat64 = discoverNat64Prefix(context, network)
+    val dns64 = validateDns64(context, network, nat64)
+
+    // Server-assisted detection: ask the server what source it observed on the IPv4 path.
+    // This proves 464XLAT end-to-end without relying on device-side CLAT introspection.
+    val serverObs = observeServerPath(network, serverIPv4, serverPort, nat64)
+
+    val clatPresent = networkInfo.clatPresent
+
+    // CLAT-specific sub-tests only make sense when a device CLAT interface/address exists.
+    val clatQuality = if (clatPresent) {
+        assessClatQuality(context, network, networkInfo, serverIPv4, serverIPv6)
+    } else {
+        com.lenovo.mesh.ipv6diag.data.model.ClatQualityResult(
+            interfaceName = "", clatIPv4Address = null, interfaceMtu = null,
+            effectiveIPv4Mtu = null, clatLatencyMs = null, nativeIPv6LatencyMs = null,
+            latencyDeltaMs = null, status = XlatSubTestStatus.SKIPPED,
+            failureReason = "no device CLAT interface detected"
         )
-        return XlatDiagnosticSummary(
-            sessionId = sessionId,
-            nat64Prefix = skipped,
-            dns64Validation = com.lenovo.mesh.ipv6diag.data.model.DNS64ValidationResult(
-                queriedHostname = "ipv4only.arpa", rawAAAARecords = emptyList(),
-                decodedEmbeddedIPv4 = null, synthesisTested = false, prefixMatches = false,
-                status = XlatSubTestStatus.SKIPPED, failureReason = "no CLAT interface"
-            ),
-            clatQuality = com.lenovo.mesh.ipv6diag.data.model.ClatQualityResult(
-                interfaceName = "", clatIPv4Address = null, interfaceMtu = null,
-                effectiveIPv4Mtu = null, clatLatencyMs = null, nativeIPv6LatencyMs = null,
-                latencyDeltaMs = null, status = XlatSubTestStatus.SKIPPED,
-                failureReason = "no CLAT interface"
-            ),
-            platVerification = com.lenovo.mesh.ipv6diag.data.model.PlatVerificationResult(
-                serverObservedIPv6Source = null, decodedEmbeddedIPv4 = null,
-                matchesClatIPv4 = false, platIPv6Prefix = null, prefixMatchesDiscovered = false,
-                status = XlatSubTestStatus.SKIPPED, failureReason = "no CLAT interface"
-            ),
-            overallStatus = XlatChainStatus.ABSENT,
+    }
+    val platVerif = if (clatPresent) {
+        verifyPlatPath(network, serverIPv4, serverPort, nat64, clatQuality)
+    } else {
+        com.lenovo.mesh.ipv6diag.data.model.PlatVerificationResult(
+            serverObservedIPv6Source = null, decodedEmbeddedIPv4 = null,
+            matchesClatIPv4 = false, platIPv6Prefix = null, prefixMatchesDiscovered = false,
+            status = XlatSubTestStatus.SKIPPED,
+            failureReason = "no device CLAT interface — PLAT path not exercised"
         )
     }
 
-    // Run all sub-tests sequentially (each builds on the previous result)
-    val nat64 = discoverNat64Prefix(context, network)
-    val dns64 = validateDns64(context, network, nat64)
-    val clatQuality = assessClatQuality(context, network, networkInfo, serverIPv4, serverIPv6)
-    val platVerif = verifyPlatPath(network, serverIPv4, serverPort, nat64, clatQuality)
-
-    val overall = computeOverallStatus(nat64, dns64, clatQuality, platVerif)
+    val overall = computeOverallStatus(clatPresent, serverObs, nat64, dns64, clatQuality, platVerif)
 
     return XlatDiagnosticSummary(
         sessionId = sessionId,
@@ -60,19 +59,47 @@ suspend fun runXlatDiagnostics(
         clatQuality = clatQuality,
         platVerification = platVerif,
         overallStatus = overall,
+        serverObservation = serverObs,
     )
 }
 
 private fun computeOverallStatus(
+    clatPresent: Boolean,
+    serverObs: com.lenovo.mesh.ipv6diag.data.model.ServerObservationResult,
     nat64: com.lenovo.mesh.ipv6diag.data.model.NAT64PrefixResult,
     dns64: com.lenovo.mesh.ipv6diag.data.model.DNS64ValidationResult,
     clat: com.lenovo.mesh.ipv6diag.data.model.ClatQualityResult,
     plat: com.lenovo.mesh.ipv6diag.data.model.PlatVerificationResult,
 ): XlatChainStatus {
-    if (nat64.status == XlatSubTestStatus.SKIPPED) return XlatChainStatus.ABSENT
-    if (nat64.status == XlatSubTestStatus.FAIL) return XlatChainStatus.BROKEN
-    val allPass = dns64.status == XlatSubTestStatus.PASS &&
-        clat.status == XlatSubTestStatus.PASS &&
-        plat.status == XlatSubTestStatus.PASS
-    return if (allPass) XlatChainStatus.WORKING else XlatChainStatus.PARTIAL
+    val nat64Found = nat64.status == XlatSubTestStatus.PASS
+
+    // Strongest evidence: the server saw our forced-IPv4 traffic arrive as a NAT64-embedded
+    // IPv6 source. That is end-to-end proof the 464XLAT/PLAT path works, even when the device
+    // could not introspect its own CLAT interface.
+    if (serverObs.status == XlatSubTestStatus.PASS && serverObs.translationDetected) {
+        return XlatChainStatus.WORKING
+    }
+
+    if (clatPresent) {
+        // Device CLAT is active — evaluate the full 464XLAT chain.
+        if (nat64.status == XlatSubTestStatus.FAIL ||
+            clat.status == XlatSubTestStatus.FAIL ||
+            plat.status == XlatSubTestStatus.FAIL
+        ) {
+            return XlatChainStatus.BROKEN
+        }
+        val allPass = nat64Found &&
+            dns64.status == XlatSubTestStatus.PASS &&
+            clat.status == XlatSubTestStatus.PASS &&
+            plat.status == XlatSubTestStatus.PASS
+        return if (allPass) XlatChainStatus.WORKING else XlatChainStatus.PARTIAL
+    }
+
+    // No device-side CLAT. NAT64/DNS64 may still exist (IPv6-only network where apps
+    // use IPv6 sockets directly): report PARTIAL so the discovered facts are visible.
+    return if (nat64Found || dns64.status == XlatSubTestStatus.PASS) {
+        XlatChainStatus.PARTIAL
+    } else {
+        XlatChainStatus.ABSENT
+    }
 }

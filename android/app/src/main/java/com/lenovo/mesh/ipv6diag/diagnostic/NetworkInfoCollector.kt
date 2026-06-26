@@ -8,6 +8,8 @@ import android.telephony.TelephonyManager
 import com.lenovo.mesh.ipv6diag.data.model.NetworkInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetAddress
 
 class NetworkInfoCollector(private val context: Context) {
@@ -19,16 +21,18 @@ class NetworkInfoCollector(private val context: Context) {
         val netCaps = cm.getNetworkCapabilities(network)
 
         val allAddresses = linkProps?.linkAddresses?.map { it.address } ?: emptyList()
-        val allInterfaces = linkProps?.interfaceName
+        val baseInterface = linkProps?.interfaceName
 
         // Separate IPv4 and IPv6 addresses; exclude link-local IPv6 (fe80::/10)
-        val ipv4Addr = allAddresses.firstOrNull { it is java.net.Inet4Address }?.hostAddress
+        val ipv4Addr = allAddresses.firstOrNull { it is Inet4Address }?.hostAddress
         val globalIPv6 = allAddresses
-            .filter { it is java.net.Inet6Address && !it.isLinkLocalAddress }
+            .filter { it is Inet6Address && !it.isLinkLocalAddress }
             .map { it.hostAddress ?: "" }
             .filter { it.isNotEmpty() }
 
-        // CLAT detection: look for interface names starting with "clat" or "v4-"
+        // --- CLAT / 464XLAT detection (multi-signal) ---
+        // Signal A: a stacked CLAT interface named "clat*" or "v4-*". Reliable on older
+        // Android, but on API 30+ the stacked interface is often not enumerable by apps.
         val allIfaces = try {
             java.net.NetworkInterface.getNetworkInterfaces()?.toList() ?: emptyList()
         } catch (_: Exception) {
@@ -38,8 +42,22 @@ class NetworkInfoCollector(private val context: Context) {
             iface.name.startsWith("clat", ignoreCase = true) ||
                 iface.name.startsWith("v4-", ignoreCase = true)
         }
-        val clatSyntheticIPv4 = clatIface?.inetAddresses?.toList()
-            ?.firstOrNull { it is java.net.Inet4Address }?.hostAddress
+
+        // Signal B: a synthetic IPv4 in the RFC 7335 464XLAT range 192.0.0.0/29.
+        // Modern Android surfaces the CLAT address in LinkProperties (and/or on the
+        // stacked interface) even when the v4- interface itself isn't enumerable.
+        val clatRangeFromLink = allAddresses
+            .filterIsInstance<Inet4Address>()
+            .firstOrNull { isClatRange(it) }
+        val clatRangeFromIface = clatIface?.inetAddresses?.toList()
+            ?.filterIsInstance<Inet4Address>()
+            ?.firstOrNull()
+
+        val clatPresent = clatIface != null || clatRangeFromLink != null
+        val clatInterfaceName = clatIface?.name
+            ?: clatRangeFromLink?.let { baseInterface }
+        val clatSyntheticIPv4 = (clatRangeFromLink ?: clatRangeFromIface)?.hostAddress
+        val allInterfaces = baseInterface
 
         // DNS servers from link properties
         val dnsServers = linkProps?.dnsServers?.map { it.hostAddress ?: "" }
@@ -61,8 +79,8 @@ class NetworkInfoCollector(private val context: Context) {
             cellularIPv4Address = ipv4Addr,
             cellularIPv6Addresses = globalIPv6,
             hasNativeIPv6 = globalIPv6.isNotEmpty(),
-            clatPresent = clatIface != null,
-            clatInterfaceName = clatIface?.name,
+            clatPresent = clatPresent,
+            clatInterfaceName = clatInterfaceName,
             clatSyntheticIPv4 = clatSyntheticIPv4,
             clatIPv6Prefix = null, // Populated separately if detectable via DNS64 prefix
             dnsServers = dnsServers,
@@ -70,5 +88,15 @@ class NetworkInfoCollector(private val context: Context) {
             mobileDataEnabled = tm.isDataEnabled,
             apiLevel = Build.VERSION.SDK_INT,
         )
+    }
+
+    /** True if [addr] falls in 192.0.0.0/29, the RFC 7335 range reserved for 464XLAT CLAT. */
+    private fun isClatRange(addr: Inet4Address): Boolean {
+        val b = addr.address
+        return b.size == 4 &&
+            b[0] == 192.toByte() &&
+            b[1] == 0.toByte() &&
+            b[2] == 0.toByte() &&
+            (b[3].toInt() and 0xF8) == 0
     }
 }

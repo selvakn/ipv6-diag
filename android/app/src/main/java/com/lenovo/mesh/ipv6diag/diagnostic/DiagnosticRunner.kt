@@ -69,9 +69,11 @@ class DiagnosticRunner(
             val ipv4Addr = resolveAddress(endpoint.hostname, isIPv6 = false)
             val ipv6Addr = resolveAddress(endpoint.hostname, isIPv6 = true)
 
-            // Run selected test types
+            // Run selected test types. Under ALL, run 464XLAT diagnostics whenever IPv6 is
+            // present — NAT64/DNS64/CLAT only apply on IPv6 networks, and CLAT detection is
+            // best-effort, so we must not gate the whole probe on clatPresent alone.
             val runXlat = filter == TestFilter.XLAT_464 ||
-                (filter == TestFilter.ALL && networkInfo.clatPresent)
+                (filter == TestFilter.ALL && (networkInfo.clatPresent || networkInfo.hasNativeIPv6))
             val baseTypes = when (filter) {
                 TestFilter.ALL -> listOf(TestType.HTTP, TestType.HTTPS, TestType.ICMP, TestType.DNS)
                 TestFilter.HTTP_HTTPS -> listOf(TestType.HTTP, TestType.HTTPS)

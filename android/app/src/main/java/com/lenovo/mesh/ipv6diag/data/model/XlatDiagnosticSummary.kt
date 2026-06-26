@@ -60,6 +60,17 @@ data class PlatVerificationResult(
 )
 
 @Serializable
+data class ServerObservationResult(
+    val probedVia: String?,            // e.g. "IPv4 (CLAT path)"
+    val serverObservedSource: String?, // the client_address the server reported seeing
+    val observedFamily: String?,       // "IPv4" or "IPv6"
+    val translationDetected: Boolean,  // sent over IPv4 but server saw a NAT64 IPv6 source
+    val decodedEmbeddedIPv4: String?,  // IPv4 decoded from the observed NAT64 address
+    val status: XlatSubTestStatus,
+    val failureReason: String? = null,
+)
+
+@Serializable
 data class XlatDiagnosticSummary(
     val sessionId: String,
     val nat64Prefix: NAT64PrefixResult,
@@ -67,5 +78,6 @@ data class XlatDiagnosticSummary(
     val clatQuality: ClatQualityResult,
     val platVerification: PlatVerificationResult,
     val overallStatus: XlatChainStatus,
+    val serverObservation: ServerObservationResult? = null,
     val timestamp: Long = System.currentTimeMillis(),
 )
