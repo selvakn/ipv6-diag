@@ -201,6 +201,7 @@ async function showDetail(id, pushHistory = false) {
     <div class="section">
       <div class="section-title">Network</div>
       ${kv('Interface', net.cellularInterfaceName||'—')}${kv('IPv4', net.cellularIPv4Address||'—')}
+      ${kv('Service Provider', net.serviceProviderName||'—')}
       ${kv('IPv6', (net.cellularIPv6Addresses||[]).join(', ')||'—')}
       ${kv('Native IPv6', net.hasNativeIPv6?'Yes':'No')}
       ${kv('CLAT / 464XLAT', net.clatPresent?'Present ('+net.clatInterfaceName+')':'Not detected')}

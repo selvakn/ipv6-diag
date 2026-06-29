@@ -84,6 +84,7 @@ fun NetworkInfoScreen(navController: NavController) {
 
             InfoSection("Cellular Interface") {
                 InfoRow("Interface", ni.cellularInterfaceName ?: "unknown")
+                InfoRow("Service Provider", ni.serviceProviderName ?: "unknown")
                 InfoRow("IPv4 Address", ni.cellularIPv4Address ?: "none")
                 InfoRow("IPv6 Addresses", ni.cellularIPv6Addresses.joinToString("\n").ifEmpty { "none" })
                 InfoRow("Native IPv6", if (ni.hasNativeIPv6) "Yes ✓" else "No")

@@ -73,9 +73,15 @@ class NetworkInfoCollector(private val context: Context) {
         }
 
         val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        val serviceProviderName = when {
+            tm.networkOperatorName.isNotBlank() -> tm.networkOperatorName
+            tm.simOperatorName.isNotBlank() -> tm.simOperatorName
+            else -> null
+        }
 
         NetworkInfo(
             cellularInterfaceName = allInterfaces,
+            serviceProviderName = serviceProviderName,
             cellularIPv4Address = ipv4Addr,
             cellularIPv6Addresses = globalIPv6,
             hasNativeIPv6 = globalIPv6.isNotEmpty(),

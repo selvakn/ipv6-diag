@@ -30,7 +30,7 @@ func (h *DiagHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	localAddr := localIP(r)
-	clientAddr := remoteIP(r.RemoteAddr)
+	clientAddr := clientIP(r)
 
 	proto := "HTTP"
 	if h.IsTLS {
@@ -69,6 +69,29 @@ func remoteIP(addr string) string {
 		return addr
 	}
 	return host
+}
+
+// clientIP resolves the end-client IP in reverse-proxy environments.
+//
+// Fly.io sets Fly-Client-IP and X-Forwarded-For. Prefer Fly-Client-IP for
+// direct Fly edge traffic; fall back to the left-most valid X-Forwarded-For IP
+// (original client), then socket remote address.
+func clientIP(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get("Fly-Client-IP")); v != "" && net.ParseIP(v) != nil {
+		return v
+	}
+
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for _, part := range parts {
+			candidate := strings.TrimSpace(part)
+			if net.ParseIP(candidate) != nil {
+				return candidate
+			}
+		}
+	}
+
+	return remoteIP(r.RemoteAddr)
 }
 
 // classifyFamily returns "IPv4" for IPv4 addresses (including ::ffff: mapped ones)

@@ -29,6 +29,7 @@ object SessionExporter {
         val ni = session.networkInfo
         appendLine("Mobile data   : ${if (ni.mobileDataEnabled) "enabled" else "DISABLED"}")
         appendLine("Interface     : ${ni.cellularInterfaceName ?: "unknown"}")
+        appendLine("Provider      : ${ni.serviceProviderName ?: "unknown"}")
         appendLine("IPv4 address  : ${ni.cellularIPv4Address ?: "none"}")
         appendLine("IPv6 addresses: ${ni.cellularIPv6Addresses.joinToString(", ").ifEmpty { "none" }}")
         appendLine("Native IPv6   : ${ni.hasNativeIPv6}")

@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class NetworkInfo(
     val cellularInterfaceName: String? = null,
+    val serviceProviderName: String? = null,
     val cellularIPv4Address: String? = null,
     val cellularIPv6Addresses: List<String> = emptyList(),
     val hasNativeIPv6: Boolean = false,
