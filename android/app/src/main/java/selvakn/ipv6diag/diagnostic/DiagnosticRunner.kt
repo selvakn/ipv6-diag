@@ -22,7 +22,7 @@ import java.net.InetAddress
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
-enum class TestFilter { ALL, HTTP_HTTPS, ICMP, DNS, XLAT_464 }
+enum class TestFilter { ALL, HTTP_HTTPS, ICMP, DNS, STUN_TURN, XLAT_464 }
 
 class DiagnosticRunner(
     private val context: Context,
@@ -46,6 +46,8 @@ class DiagnosticRunner(
         endpoint: ServerEndpoint,
         filter: TestFilter,
     ): DiagnosticSession = coroutineScope {
+        val (targetHost, customPort) = parseHostAndPort(endpoint.hostname)
+        val stunTurnPort = customPort ?: 3478
         val sessionId = UUID.randomUUID().toString()
         val networkInfo = networkInfoCollector.collect(network)
         val networkChanged = AtomicBoolean(false)
@@ -66,8 +68,8 @@ class DiagnosticRunner(
 
         try {
             // Resolve server addresses using system resolver
-            val ipv4Addr = resolveAddress(endpoint.hostname, isIPv6 = false)
-            val ipv6Addr = resolveAddress(endpoint.hostname, isIPv6 = true)
+            val ipv4Addr = resolveAddress(targetHost, isIPv6 = false)
+            val ipv6Addr = resolveAddress(targetHost, isIPv6 = true)
 
             // Run selected test types. Under ALL, run 464XLAT diagnostics whenever IPv6 is
             // present — NAT64/DNS64/CLAT only apply on IPv6 networks, and CLAT detection is
@@ -79,6 +81,7 @@ class DiagnosticRunner(
                 TestFilter.HTTP_HTTPS -> listOf(TestType.HTTP, TestType.HTTPS)
                 TestFilter.ICMP -> listOf(TestType.ICMP)
                 TestFilter.DNS -> listOf(TestType.DNS)
+                TestFilter.STUN_TURN -> listOf(TestType.STUN, TestType.TURN)
                 TestFilter.XLAT_464 -> emptyList()
             }
             val testTypes = baseTypes
@@ -92,17 +95,17 @@ class DiagnosticRunner(
                         if (ipv6Addr != null) add(runHttpTest(network, sessionId, ipv6Addr, endpoint.httpPort, AddressFamily.IPv6))
                     }
                     TestType.HTTPS -> buildList {
-                        if (ipv4Addr != null) add(runHttpsTest(network, sessionId, endpoint.hostname, ipv4Addr, endpoint.httpsPort, AddressFamily.IPv4))
-                        if (ipv6Addr != null) add(runHttpsTest(network, sessionId, endpoint.hostname, ipv6Addr, endpoint.httpsPort, AddressFamily.IPv6))
+                        if (ipv4Addr != null) add(runHttpsTest(network, sessionId, targetHost, ipv4Addr, endpoint.httpsPort, AddressFamily.IPv4))
+                        if (ipv6Addr != null) add(runHttpsTest(network, sessionId, targetHost, ipv6Addr, endpoint.httpsPort, AddressFamily.IPv6))
                     }
                     TestType.ICMP -> buildList {
                         if (ipv4Addr != null) add(runIcmpTest(sessionId, ipv4Addr, AddressFamily.IPv4))
                         if (ipv6Addr != null) add(runIcmpTest(sessionId, ipv6Addr, AddressFamily.IPv6))
                     }
-                    TestType.DNS -> runDnsTests(context, network, sessionId, endpoint.hostname)
+                    TestType.DNS -> runDnsTests(context, network, sessionId, targetHost)
                     TestType.STUN -> buildList {
-                        if (ipv4Addr != null) add(runStunTest(network, sessionId, ipv4Addr, AddressFamily.IPv4))
-                        if (ipv6Addr != null) add(runStunTest(network, sessionId, ipv6Addr, AddressFamily.IPv6))
+                        if (ipv4Addr != null) add(runStunTest(network, sessionId, ipv4Addr, stunTurnPort, AddressFamily.IPv4))
+                        if (ipv6Addr != null) add(runStunTest(network, sessionId, ipv6Addr, stunTurnPort, AddressFamily.IPv6))
                         if (isEmpty()) {
                             add(
                                 TestResult(
@@ -117,8 +120,8 @@ class DiagnosticRunner(
                         }
                     }
                     TestType.TURN -> buildList {
-                        if (ipv4Addr != null) add(runTurnTest(network, sessionId, ipv4Addr, AddressFamily.IPv4))
-                        if (ipv6Addr != null) add(runTurnTest(network, sessionId, ipv6Addr, AddressFamily.IPv6))
+                        if (ipv4Addr != null) add(runTurnTest(network, sessionId, ipv4Addr, stunTurnPort, AddressFamily.IPv4))
+                        if (ipv6Addr != null) add(runTurnTest(network, sessionId, ipv6Addr, stunTurnPort, AddressFamily.IPv6))
                         if (isEmpty()) {
                             add(
                                 TestResult(
@@ -190,4 +193,13 @@ class DiagnosticRunner(
                     }?.hostAddress
             }.getOrNull()
         }
+
+    private fun parseHostAndPort(input: String): Pair<String, Int?> {
+        val idx = input.lastIndexOf(':')
+        if (idx <= 0 || idx == input.length - 1) return input to null
+        val port = input.substring(idx + 1).toIntOrNull() ?: return input to null
+        if (port !in 1..65535) return input to null
+        val host = input.substring(0, idx)
+        return host to port
+    }
 }

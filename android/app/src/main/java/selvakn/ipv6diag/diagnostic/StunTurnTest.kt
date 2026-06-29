@@ -16,8 +16,6 @@ import java.security.SecureRandom
 import java.util.UUID
 
 private const val STUN_MAGIC_COOKIE = 0x2112A442
-private const val STUN_PORT = 3478
-private const val TURN_PORT = 3478
 private const val UDP_TIMEOUT_MS = 3000
 
 private val random = SecureRandom()
@@ -26,13 +24,14 @@ suspend fun runStunTest(
     network: Network,
     sessionId: String,
     targetIp: String,
+    targetPort: Int,
     addressFamily: AddressFamily,
 ): TestResult = withContext(Dispatchers.IO) {
     val start = System.currentTimeMillis()
     val transactionId = ByteArray(12).also { random.nextBytes(it) }
     val request = buildStunHeader(messageType = 0x0001, body = ByteArray(0), transactionId = transactionId)
 
-    val response = runUdpProbe(network, targetIp, STUN_PORT, request)
+    val response = runUdpProbe(network, targetIp, targetPort, request)
     val latency = System.currentTimeMillis() - start
 
     when (response) {
@@ -60,6 +59,7 @@ suspend fun runTurnTest(
     network: Network,
     sessionId: String,
     targetIp: String,
+    targetPort: Int,
     addressFamily: AddressFamily,
 ): TestResult = withContext(Dispatchers.IO) {
     val start = System.currentTimeMillis()
@@ -73,7 +73,7 @@ suspend fun runTurnTest(
     )
     val request = buildStunHeader(messageType = 0x0003, body = body, transactionId = transactionId)
 
-    val response = runUdpProbe(network, targetIp, TURN_PORT, request)
+    val response = runUdpProbe(network, targetIp, targetPort, request)
     val latency = System.currentTimeMillis() - start
 
     when (response) {

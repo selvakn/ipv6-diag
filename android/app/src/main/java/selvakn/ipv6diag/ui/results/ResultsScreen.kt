@@ -112,7 +112,7 @@ fun ResultsScreen(sessionId: String, navController: NavController) {
             }
 
             items(s.testResults) { result ->
-                TestResultCard(result)
+                TestResultCard(result, s.testEndpointHost)
             }
 
             // 464XLAT section
@@ -242,7 +242,7 @@ private fun XlatRow(label: String, status: XlatSubTestStatus, detail: String) {
 }
 
 @Composable
-private fun TestResultCard(result: TestResult) {
+private fun TestResultCard(result: TestResult, testEndpointHost: String) {
     val statusColor = when (result.status) {
         TestStatus.PASS -> Color(0xFF388E3C)
         TestStatus.FAIL -> Color(0xFFD32F2F)
@@ -259,6 +259,9 @@ private fun TestResultCard(result: TestResult) {
                 Text(result.status.name, color = statusColor, style = MaterialTheme.typography.labelMedium)
             }
             result.latencyMs?.let { Text("Latency: ${it}ms", style = MaterialTheme.typography.bodySmall) }
+            if (result.testType.name == "STUN" || result.testType.name == "TURN") {
+                Text("Probe target: $testEndpointHost", style = MaterialTheme.typography.bodySmall)
+            }
             result.packetLoss?.let { Text("Packet loss: ${(it * 100).toInt()}%", style = MaterialTheme.typography.bodySmall) }
             result.resolvedAddress?.let { Text("Address: $it", style = MaterialTheme.typography.bodySmall) }
             if (result.iceCandidates.isNotEmpty()) {
