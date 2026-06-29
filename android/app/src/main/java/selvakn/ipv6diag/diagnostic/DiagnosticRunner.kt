@@ -134,6 +134,7 @@ class DiagnosticRunner(
                 id = sessionId,
                 timestamp = System.currentTimeMillis(),
                 serverEndpoint = endpoint,
+                testEndpointHost = endpoint.hostname,
                 networkInfo = networkInfo,
                 testResults = allResults,
                 status = status,

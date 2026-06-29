@@ -24,6 +24,10 @@ class IPv6DiagApplication : Application() {
         _uploadStatus.value = _uploadStatus.value + (sessionId to status)
     }
 
+    val reportingBaseUrl: String by lazy {
+        "https://${getString(R.string.default_server_hostname)}"
+    }
+
     override fun onCreate() {
         super.onCreate()
         val db = AppDatabase.getInstance(this)

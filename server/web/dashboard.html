@@ -195,6 +195,7 @@ async function showDetail(id, pushHistory = false) {
     <div class="section">
       <div class="section-title">Device</div>
       ${kv('Name', d.device_name)}${kv('Model', d.device_model)}${kv('Manufacturer', d.device_manufacturer)}${kv('Android Version', d.android_version)}${kv('Device ID', d.device_id)}
+      ${kv('Test Endpoint', d.test_endpoint || 'legacy/unknown')}
       ${kv('Uploaded', new Date(d.uploaded_at).toLocaleString())}${kv('Run at', new Date(d.run_timestamp).toLocaleString())}
     </div>
 

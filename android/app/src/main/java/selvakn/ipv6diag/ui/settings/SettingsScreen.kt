@@ -40,6 +40,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
+import java.util.regex.Pattern
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -95,21 +96,26 @@ fun SettingsScreen(navController: NavController) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
-                        if (customHostname.isBlank()) {
-                            scope.launch { snackbar.showSnackbar("Enter a hostname first") }
+                        val input = customHostname.trim()
+                        if (input.isBlank()) {
+                            scope.launch { snackbar.showSnackbar("Enter host or host:port") }
+                            return@Button
+                        }
+                        if (!isValidTestEndpoint(input)) {
+                            scope.launch { snackbar.showSnackbar("Use host or host:port only") }
                             return@Button
                         }
                         scope.launch {
                             isVerifying = true
-                            val reachable = verifyReachability(customHostname)
+                            val reachable = verifyReachability(input)
                             if (reachable) {
-                                app.sessionRepository.saveCustomEndpoint(customHostname.trim())
-                                currentEndpoint = customHostname.trim()
+                                app.sessionRepository.saveCustomEndpoint(input)
+                                currentEndpoint = input
                                 snackbar.showSnackbar("Custom server saved")
                             } else {
                                 snackbar.showSnackbar("Server unreachable — saved anyway")
-                                app.sessionRepository.saveCustomEndpoint(customHostname.trim())
-                                currentEndpoint = customHostname.trim()
+                                app.sessionRepository.saveCustomEndpoint(input)
+                                currentEndpoint = input
                             }
                             isVerifying = false
                         }
@@ -151,3 +157,20 @@ private suspend fun verifyReachability(hostname: String): Boolean =
                 .use { it.isSuccessful }
         }.getOrDefault(false)
     }
+
+private val endpointPattern = Pattern.compile("^[A-Za-z0-9.-]+(?::\\d{1,5})?$")
+
+private fun isValidTestEndpoint(input: String): Boolean {
+    if (input.contains("://") || input.contains("/") || input.contains("?") || input.contains("#")) {
+        return false
+    }
+    if (!endpointPattern.matcher(input).matches()) {
+        return false
+    }
+    val portText = input.substringAfter(':', "")
+    if (portText.isNotEmpty()) {
+        val port = portText.toIntOrNull() ?: return false
+        if (port !in 1..65535) return false
+    }
+    return true
+}

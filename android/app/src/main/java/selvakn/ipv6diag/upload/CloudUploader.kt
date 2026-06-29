@@ -28,6 +28,7 @@ data class CloudUploadRequest(
     @SerialName("pass_count") val passCount: Int,
     @SerialName("total_count") val totalCount: Int,
     @SerialName("run_timestamp") val runTimestamp: Long,
+    @SerialName("test_endpoint") val testEndpoint: String,
 )
 
 private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
@@ -53,6 +54,7 @@ suspend fun uploadReport(
             passCount = passCount,
             totalCount = session.testResults.size,
             runTimestamp = session.timestamp,
+            testEndpoint = session.testEndpointHost,
         )
         val body = json.encodeToString(CloudUploadRequest.serializer(), payload)
             .toRequestBody("application/json".toMediaType())

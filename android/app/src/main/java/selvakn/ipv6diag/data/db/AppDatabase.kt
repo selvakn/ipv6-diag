@@ -31,6 +31,12 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE diagnostic_sessions ADD COLUMN test_endpoint_host TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 @Database(
     entities = [
         DiagnosticSessionEntity::class,
@@ -38,7 +44,7 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         ServerEndpointEntity::class,
         XlatSummaryEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -57,7 +63,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "ipv6diag.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
             }
     }
 }

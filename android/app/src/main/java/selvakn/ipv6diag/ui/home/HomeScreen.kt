@@ -102,7 +102,7 @@ fun HomeScreen(navController: NavController) {
                                 launch {
                                     val device = DeviceInfoCollector.collect(context)
                                     val xlat = app.sessionRepository.getXlatSummary(session.id)
-                                    val status = uploadReport(session, device, xlat, endpoint.baseUrl)
+                                    val status = uploadReport(session, device, xlat, app.reportingBaseUrl)
                                     app.setUploadStatus(session.id, status)
                                 }
                                 navController.navigate("results/${session.id}")

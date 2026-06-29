@@ -31,6 +31,7 @@ type UploadRequest struct {
 	PassCount    int             `json:"pass_count"`
 	TotalCount   int             `json:"total_count"`
 	RunTimestamp int64           `json:"run_timestamp"`
+	TestEndpoint string          `json:"test_endpoint"`
 }
 
 type ReportSummary struct {
@@ -48,6 +49,7 @@ type ReportDetail struct {
 	DeviceManufacturer string          `json:"device_manufacturer"`
 	AndroidVersion     string          `json:"android_version"`
 	DeviceID           string          `json:"device_id"`
+	TestEndpoint       string          `json:"test_endpoint"`
 	Network            json.RawMessage `json:"network"`
 	TestResults        json.RawMessage `json:"test_results"`
 	XlatSummary        json.RawMessage `json:"xlat_summary"`
@@ -70,8 +72,8 @@ func (s *ReportStore) Upsert(req *UploadRequest) error {
 		INSERT OR REPLACE INTO reports
 			(id, device_name, device_model, device_manufacturer, android_version, device_id,
 			 network_json, test_results_json, xlat_summary_json,
-			 pass_count, total_count, run_timestamp, uploaded_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 pass_count, total_count, run_timestamp, uploaded_at, test_endpoint)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		req.SessionID,
 		req.Device.Name,
 		req.Device.Model,
@@ -85,6 +87,7 @@ func (s *ReportStore) Upsert(req *UploadRequest) error {
 		req.TotalCount,
 		req.RunTimestamp,
 		time.Now().UnixMilli(),
+		req.TestEndpoint,
 	)
 	return err
 }
@@ -148,16 +151,17 @@ func (s *ReportStore) GetByID(id string) (*ReportDetail, error) {
 	row := s.db.QueryRow(`
 		SELECT id, device_name, device_model, device_manufacturer, android_version, device_id,
 		       pass_count, total_count, run_timestamp, uploaded_at,
-		       network_json, test_results_json, xlat_summary_json
+		       network_json, test_results_json, xlat_summary_json, test_endpoint
 		FROM reports WHERE id = ?`, id)
 
 	var r ReportDetail
 	var networkJSON, testResultsJSON, xlatJSON string
+	var testEndpoint sql.NullString
 	err := row.Scan(
 		&r.ID, &r.DeviceName, &r.DeviceModel, &r.DeviceManufacturer,
 		&r.AndroidVersion, &r.DeviceID,
 		&r.PassCount, &r.TotalCount, &r.RunTimestamp, &r.UploadedAt,
-		&networkJSON, &testResultsJSON, &xlatJSON,
+		&networkJSON, &testResultsJSON, &xlatJSON, &testEndpoint,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -168,5 +172,8 @@ func (s *ReportStore) GetByID(id string) (*ReportDetail, error) {
 	r.Network = json.RawMessage(networkJSON)
 	r.TestResults = json.RawMessage(testResultsJSON)
 	r.XlatSummary = json.RawMessage(xlatJSON)
+	if testEndpoint.Valid {
+		r.TestEndpoint = testEndpoint.String
+	}
 	return &r, nil
 }

@@ -35,10 +35,17 @@ func migrate(db *sql.DB) error {
 			pass_count          INTEGER NOT NULL,
 			total_count         INTEGER NOT NULL,
 			run_timestamp       INTEGER NOT NULL,
-			uploaded_at         INTEGER NOT NULL
+			uploaded_at         INTEGER NOT NULL,
+			test_endpoint       TEXT
 		);
 		CREATE INDEX IF NOT EXISTS idx_reports_uploaded_at ON reports(uploaded_at);
 		CREATE INDEX IF NOT EXISTS idx_reports_device_name ON reports(device_name);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Backward-compatible migration path for existing databases.
+	_, _ = db.Exec(`ALTER TABLE reports ADD COLUMN test_endpoint TEXT`)
+	return nil
 }
