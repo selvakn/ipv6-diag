@@ -8,7 +8,7 @@
   body { font-family: system-ui, sans-serif; margin: 0; background: #f4f6f8; color: #1b1f23; }
   header { background: #0b5fff; color: #fff; padding: 14px 18px; }
   header h1 { margin: 0; font-size: 1.1rem; }
-  main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+  main { padding: 16px; max-width: 1200px; margin: 0 auto; }
   .card { background: #fff; border-radius: 8px; padding: 14px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
   .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; align-items: center; }
   .row label { font-size: 0.9rem; min-width: 120px; }
@@ -31,13 +31,12 @@
 </style>
 </head>
 <body>
-<header>
-  <h1>Browser Network Diagnostics</h1>
-</header>
+<header><h1>Browser Network Diagnostics</h1></header>
 <main>
   <section class="card">
     <div class="row"><strong>Configuration</strong></div>
     <div class="row hint" id="config-summary">Loading configuration...</div>
+    <div class="row hint" id="turn-profile-summary"></div>
     <div class="row">
       <label>Per-test timeout</label>
       <input id="timeout" type="number" min="1000" step="1000" />
@@ -68,8 +67,12 @@
   <section class="card">
     <div class="row"><strong>Current Run Results</strong></div>
     <table>
-      <thead><tr><th>Test</th><th>Target</th><th>Origin</th><th>Status</th><th>Duration</th><th>Reason / Evidence</th></tr></thead>
-      <tbody id="results-body"><tr><td colspan="6">No run started yet.</td></tr></tbody>
+      <thead>
+      <tr>
+        <th>Test</th><th>Target</th><th>Origin</th><th>Status</th><th>Duration</th><th>Latency</th><th>Rate</th><th>Quality</th><th>Reason / Evidence</th>
+      </tr>
+      </thead>
+      <tbody id="results-body"><tr><td colspan="9">No run started yet.</td></tr></tbody>
     </table>
   </section>
 
@@ -80,25 +83,19 @@
 </main>
 
 <script>
-const HISTORY_KEY = "browser_diag_run_history_v1";
+const HISTORY_KEY = "browser_diag_run_history_v2";
 let config = null;
 let runHistory = [];
 
 function nowIso() { return new Date().toISOString(); }
 function msSince(startIso) { return Date.now() - new Date(startIso).getTime(); }
-function escapeHtml(s) { return String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
+function escapeHtml(s) { return String(s ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
 
 function loadHistory() {
-  try {
-    runHistory = JSON.parse(sessionStorage.getItem(HISTORY_KEY) || "[]");
-  } catch (_) {
-    runHistory = [];
-  }
+  try { runHistory = JSON.parse(sessionStorage.getItem(HISTORY_KEY) || "[]"); }
+  catch (_) { runHistory = []; }
 }
-
-function saveHistory() {
-  sessionStorage.setItem(HISTORY_KEY, JSON.stringify(runHistory));
-}
+function saveHistory() { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(runHistory)); }
 
 function selectedTests() {
   const out = [];
@@ -113,7 +110,7 @@ function selectedTests() {
 function renderResults(results) {
   const body = document.getElementById("results-body");
   if (!results.length) {
-    body.innerHTML = "<tr><td colspan='6'>No run started yet.</td></tr>";
+    body.innerHTML = "<tr><td colspan='9'>No run started yet.</td></tr>";
     return;
   }
   body.innerHTML = results.map(r => `
@@ -123,6 +120,9 @@ function renderResults(results) {
       <td>${escapeHtml(r.origin)}</td>
       <td><span class="status ${r.status}">${escapeHtml(r.status)}</span></td>
       <td>${r.durationMs != null ? r.durationMs + " ms" : "—"}</td>
+      <td>${r.roundTripLatencyMs != null ? r.roundTripLatencyMs.toFixed(1) + " ms" : "—"}</td>
+      <td>${r.transferRateKbps != null ? r.transferRateKbps.toFixed(1) + " kbps" : "—"}</td>
+      <td>${r.deliveryQualityRatio != null ? (r.deliveryQualityRatio * 100).toFixed(1) + "% / " + (r.qualityThresholdRatio * 100).toFixed(0) + "%" : "—"}</td>
       <td>${escapeHtml(r.reason || r.evidence || "")}</td>
     </tr>
   `).join("");
@@ -139,113 +139,303 @@ function renderHistory() {
     return `<div class="history-item" data-index="${idx}">
       <strong>${new Date(run.startedAt).toLocaleString()}</strong>
       <div>${run.selectedTests.join(", ")}</div>
-      <div>${pass}/${run.results.length} passed</div>
+      <div>${pass}/${run.results.length} passed · upload: ${run.persistenceStatus || "pending"}</div>
     </div>`;
   }).join("");
   holder.querySelectorAll(".history-item").forEach(el => {
-    el.addEventListener("click", () => {
-      const index = Number(el.getAttribute("data-index"));
-      renderResults(runHistory[index].results);
-    });
+    el.addEventListener("click", () => renderResults(runHistory[Number(el.getAttribute("data-index"))].results));
   });
 }
 
-function timeoutPromise(ms) {
-  return new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms));
-}
+function timeoutPromise(ms) { return new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)); }
 
 async function runHttpLike(url, timeoutMs) {
   const start = nowIso();
   try {
-    const response = await Promise.race([
-      fetch(url, { method: "GET", mode: "no-cors", cache: "no-store" }),
-      timeoutPromise(timeoutMs)
-    ]);
-    return { status: "passed", startedAt: start, endedAt: nowIso(), durationMs: msSince(start), evidence: "Request completed", reason: response ? "" : "" };
+    await Promise.race([fetch(url, { method: "GET", mode: "no-cors", cache: "no-store" }), timeoutPromise(timeoutMs)]);
+    return { status: "passed", startedAt: start, endedAt: nowIso(), durationMs: msSince(start), evidence: "Request completed" };
   } catch (err) {
-    const timedOut = String(err && err.message).includes("timeout");
+    const timedOut = String(err?.message || "").includes("timeout");
     return { status: timedOut ? "timed_out" : "failed", startedAt: start, endedAt: nowIso(), durationMs: msSince(start), reason: timedOut ? "Per-test timeout reached" : "Request failed or blocked by browser/network policy" };
   }
 }
 
-async function runStunOrTurn(targetUrl, timeoutMs, type) {
+function setupPeerBridge(pcA, pcB) {
+  pcA.onicecandidate = (e) => { if (e.candidate) pcB.addIceCandidate(e.candidate).catch(() => {}); };
+  pcB.onicecandidate = (e) => { if (e.candidate) pcA.addIceCandidate(e.candidate).catch(() => {}); };
+}
+
+function awaitOpen(channel, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    if (channel.readyState === "open") return resolve();
+    const timer = setTimeout(() => reject(new Error("data channel open timeout")), timeoutMs);
+    channel.onopen = () => { clearTimeout(timer); resolve(); };
+    channel.onerror = () => { clearTimeout(timer); reject(new Error("data channel open error")); };
+  });
+}
+
+function buildPayload(size, marker) {
+  const arr = new Uint8Array(size);
+  arr[0] = marker;
+  for (let i = 1; i < size; i++) arr[i] = (i % 251);
+  return arr;
+}
+
+async function runTurnTransfer(targetUrl, timeoutMs) {
   if (!window.RTCPeerConnection) {
     return { status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "WebRTC unavailable in browser" };
   }
   const startedAt = nowIso();
-  let turnCreds = null;
-  if (type === "TURN" && config.turn_credential_mode === "tokenless_endpoint") {
+  let creds = null;
+  if (config.turn_credential_mode === "tokenless_endpoint") {
     try {
       const resp = await fetch("/turn/credentials");
-      if (resp.ok) {
-        turnCreds = await resp.json();
-      }
+      if (resp.ok) creds = await resp.json();
     } catch (_) {}
   }
-
   const iceServer = { urls: [targetUrl] };
-  if (type === "TURN" && turnCreds && turnCreds.username && turnCreds.password) {
-    iceServer.username = turnCreds.username;
-    iceServer.credential = turnCreds.password;
+  if (creds?.username && creds?.password) {
+    iceServer.username = creds.username;
+    iceServer.credential = creds.password;
   }
 
-  return new Promise((resolve) => {
-    const pc = new RTCPeerConnection({ iceServers: [iceServer] });
-    let done = false;
-    const stop = (status, reason, evidence) => {
-      if (done) return;
-      done = true;
-      try { pc.close(); } catch (_) {}
-      resolve({ status, reason, evidence, startedAt, endedAt: nowIso(), durationMs: msSince(startedAt) });
-    };
-    const timer = setTimeout(() => stop("timed_out", "Per-test timeout reached"), timeoutMs);
+  const pcA = new RTCPeerConnection({ iceServers: [iceServer], iceTransportPolicy: "relay" });
+  const pcB = new RTCPeerConnection({ iceServers: [iceServer], iceTransportPolicy: "relay" });
+  setupPeerBridge(pcA, pcB);
 
+  const channelAB = pcA.createDataChannel("ab", { ordered: true });
+  const channelBA = pcB.createDataChannel("ba", { ordered: true });
+
+  let remoteAB = null;
+  let remoteBA = null;
+  pcB.ondatachannel = (evt) => { if (evt.channel.label === "ab") remoteAB = evt.channel; };
+  pcA.ondatachannel = (evt) => { if (evt.channel.label === "ba") remoteBA = evt.channel; };
+
+  try {
+    const offer = await pcA.createOffer();
+    await pcA.setLocalDescription(offer);
+    await pcB.setRemoteDescription(offer);
+    const answer = await pcB.createAnswer();
+    await pcB.setLocalDescription(answer);
+    await pcA.setRemoteDescription(answer);
+    await Promise.race([Promise.all([awaitOpen(channelAB, timeoutMs), awaitOpen(channelBA, timeoutMs)]), timeoutPromise(timeoutMs)]);
+  } catch (err) {
+    pcA.close(); pcB.close();
+    return { status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt), reason: "TURN peer setup failed: " + String(err?.message || err) };
+  }
+
+  const rtts = [];
+  let sentPackets = 0;
+  let receivedPackets = 0;
+  let bytesSent = 0;
+  let bytesReceived = 0;
+  let pingCounter = 0;
+  const pendingPings = new Map();
+
+  const dataPayload = buildPayload(config.turn_payload_size_bytes || 1024, 0x01);
+  const bDataHandler = (event) => {
+    if (event.data instanceof ArrayBuffer) {
+      const data = new Uint8Array(event.data);
+      if (data[0] === 0x02) {
+        if (channelBA.readyState === "open") channelBA.send(data);
+        return;
+      }
+      bytesReceived += data.byteLength;
+      receivedPackets += 1;
+    }
+  };
+  const aDataHandler = (event) => {
+    if (event.data instanceof ArrayBuffer) {
+      const data = new Uint8Array(event.data);
+      if (data[0] === 0x02) {
+        const id = new DataView(data.buffer).getUint32(1);
+        const start = pendingPings.get(id);
+        if (start != null) {
+          rtts.push(performance.now() - start);
+          pendingPings.delete(id);
+        }
+        return;
+      }
+      bytesReceived += data.byteLength;
+      receivedPackets += 1;
+    }
+  };
+  while (!remoteAB || !remoteBA) {
+    await new Promise((r) => setTimeout(r, 20));
+    if (msSince(startedAt) > timeoutMs) {
+      pcA.close(); pcB.close();
+      return { status: "timed_out", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt), reason: "Timed out waiting for remote channels" };
+    }
+  }
+  remoteAB.onmessage = bDataHandler;
+  remoteBA.onmessage = aDataHandler;
+
+  const windowSec = config.turn_transfer_window_seconds || 10;
+  const mps = config.turn_messages_per_second || 20;
+  const tickMs = Math.max(10, Math.floor(1000 / mps));
+  const startedPerf = performance.now();
+
+  try {
+    while ((performance.now() - startedPerf) < (windowSec * 1000)) {
+      if (channelAB.readyState !== "open" || channelBA.readyState !== "open") {
+        break;
+      }
+      channelAB.send(dataPayload);
+      channelBA.send(dataPayload);
+      bytesSent += dataPayload.byteLength * 2;
+      sentPackets += 2;
+
+      // ping on AB and expect pong mirrored on BA
+      const ping = new Uint8Array(5);
+      ping[0] = 0x02;
+      new DataView(ping.buffer).setUint32(1, pingCounter);
+      pendingPings.set(pingCounter, performance.now());
+      pingCounter += 1;
+      channelAB.send(ping);
+      bytesSent += ping.byteLength;
+      sentPackets += 1;
+      await new Promise((r) => setTimeout(r, tickMs));
+    }
+  } catch (err) {
+    pcA.close(); pcB.close();
+    return { status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt), reason: "TURN transfer error: " + String(err?.message || err) };
+  }
+
+  pcA.close();
+  pcB.close();
+  const elapsedMs = msSince(startedAt);
+  const elapsedSec = Math.max(0.001, elapsedMs / 1000);
+  const rateKbps = (bytesReceived * 8) / elapsedSec / 1000;
+  const quality = sentPackets > 0 ? (receivedPackets / sentPackets) : 0;
+  const threshold = config.turn_quality_threshold_ratio || 0.9;
+  const roundTrip = rtts.length ? (rtts.reduce((a, b) => a + b, 0) / rtts.length) : null;
+  const passed = quality >= threshold && elapsedSec >= (windowSec - 0.5);
+  const status = passed ? "passed" : "failed";
+  const reason = passed ? "" : "Delivery quality below threshold or transfer window incomplete";
+
+  return {
+    status,
+    startedAt,
+    endedAt: nowIso(),
+    durationMs: elapsedMs,
+    roundTripLatencyMs: roundTrip,
+    transferRateKbps: rateKbps,
+    bytesSent,
+    bytesReceived,
+    deliveryQualityRatio: quality,
+    qualityThresholdRatio: threshold,
+    transferWindowSeconds: windowSec,
+    payloadProfile: `${config.turn_payload_size_bytes || 1024}B@${mps}Hz`,
+    reason,
+    evidence: passed ? "Two TURN clients exchanged data for 10s" : ""
+  };
+}
+
+async function runStunCheck(targetUrl, timeoutMs) {
+  if (!window.RTCPeerConnection) {
+    return { status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "WebRTC unavailable in browser" };
+  }
+  const startedAt = nowIso();
+  const pc = new RTCPeerConnection({ iceServers: [{ urls: [targetUrl] }] });
+  let resolved = false;
+  return new Promise((resolve) => {
+    const done = (result) => {
+      if (resolved) return;
+      resolved = true;
+      try { pc.close(); } catch (_) {}
+      resolve({ ...result, startedAt, endedAt: nowIso(), durationMs: msSince(startedAt) });
+    };
+    const timer = setTimeout(() => done({ status: "timed_out", reason: "Per-test timeout reached" }), timeoutMs);
     pc.onicecandidate = (event) => {
-      if (event.candidate && !done) {
+      if (event.candidate) {
         clearTimeout(timer);
-        stop("passed", "", "ICE candidate gathered");
+        done({ status: "passed", evidence: "ICE candidate gathered" });
       }
     };
     pc.onicecandidateerror = () => {
       clearTimeout(timer);
-      stop("failed", "ICE candidate error");
+      done({ status: "failed", reason: "ICE candidate error" });
     };
-    pc.createDataChannel("diag");
-    pc.createOffer()
-      .then((offer) => pc.setLocalDescription(offer))
-      .catch(() => {
-        clearTimeout(timer);
-        stop("failed", "Failed to start ICE gathering");
-      });
+    pc.createDataChannel("stun");
+    pc.createOffer().then((offer) => pc.setLocalDescription(offer)).catch(() => {
+      clearTimeout(timer);
+      done({ status: "failed", reason: "Failed to start ICE gathering" });
+    });
   });
 }
 
 function resolveTarget(testType) {
   const custom = document.getElementById("custom-target").value.trim();
-  if (custom && config.allow_custom_targets) {
-    return { value: custom, origin: "custom" };
-  }
-  const exact = (config.default_targets || []).find(t => t.test_type === testType);
+  if (custom && config.allow_custom_targets) return { value: custom, origin: "custom" };
+  const exact = (config.default_targets || []).find((t) => t.test_type === testType);
   if (exact) return { value: exact.value, origin: "default" };
-  const selected = document.getElementById("default-targets").value;
-  return { value: selected, origin: "default" };
+  return { value: document.getElementById("default-targets").value, origin: "default" };
 }
 
 async function runOne(testType, timeoutMs) {
   const target = resolveTarget(testType);
   const base = { testType, target: target.value, origin: target.origin };
-  if (!target.value) {
-    return { ...base, status: "failed", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "No target configured" };
-  }
-  if (testType === "HTTP" || testType === "HTTPS" || testType === "ICMP_EQUIV") {
-    const result = await runHttpLike(target.value, timeoutMs);
-    return { ...base, ...result };
-  }
-  if (testType === "STUN" || testType === "TURN") {
-    const result = await runStunOrTurn(target.value, timeoutMs, testType);
-    return { ...base, ...result };
-  }
+  if (!target.value) return { ...base, status: "failed", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "No target configured" };
+  if (testType === "HTTP" || testType === "HTTPS" || testType === "ICMP_EQUIV") return { ...base, ...(await runHttpLike(target.value, timeoutMs)) };
+  if (testType === "STUN") return { ...base, ...(await runStunCheck(target.value, timeoutMs)) };
+  if (testType === "TURN") return { ...base, ...(await runTurnTransfer(target.value, timeoutMs)) };
   return { ...base, status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "Unknown test type" };
+}
+
+function mapResultToUpload(r) {
+  return {
+    id: r.testType + "-" + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
+    sessionId: r.sessionId,
+    testType: r.testType === "ICMP_EQUIV" ? "ICMP" : r.testType,
+    addressFamily: "IPv4",
+    status: (r.status || "").toUpperCase().replace("TIMED_OUT", "ABORTED") || "FAIL",
+    latencyMs: r.roundTripLatencyMs != null ? Math.round(r.roundTripLatencyMs) : (r.durationMs || null),
+    failureReason: r.reason || null,
+    resolvedAddress: r.target,
+    transferRateKbps: r.transferRateKbps ?? null,
+    bytesSent: r.bytesSent ?? null,
+    bytesReceived: r.bytesReceived ?? null,
+    deliveryQualityRatio: r.deliveryQualityRatio ?? null,
+    qualityThresholdRatio: r.qualityThresholdRatio ?? null,
+    transferWindowSeconds: r.transferWindowSeconds ?? null,
+    payloadProfile: r.payloadProfile ?? null,
+    timestamp: Date.now()
+  };
+}
+
+async function uploadRun(run) {
+  const payload = {
+    session_id: run.runId,
+    device: {
+      name: "Web Browser",
+      model: navigator.platform || "unknown",
+      manufacturer: navigator.vendor || "browser",
+      android_version: navigator.userAgent || "n/a",
+      device_id: "web-" + (navigator.userAgent || "client").slice(0, 24)
+    },
+    network: {
+      userAgent: navigator.userAgent,
+      language: navigator.language,
+      online: navigator.onLine
+    },
+    test_results: run.results.map((r) => mapResultToUpload({ ...r, sessionId: run.runId })),
+    pass_count: run.results.filter((r) => r.status === "passed").length,
+    total_count: run.results.length,
+    run_timestamp: Date.now(),
+    test_endpoint: new URL(window.location.href).host
+  };
+  try {
+    const resp = await fetch("/reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    run.persistenceStatus = "uploaded";
+  } catch (err) {
+    run.persistenceStatus = "failed";
+    run.persistenceReason = String(err?.message || err);
+  }
 }
 
 async function runSelectedTests() {
@@ -255,29 +445,25 @@ async function runSelectedTests() {
     document.getElementById("run-error").textContent = "Select at least one test.";
     return;
   }
-
   const timeoutMs = Number(document.getElementById("timeout").value) || config.per_test_timeout_ms;
   const run = {
     runId: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
     startedAt: nowIso(),
     finishedAt: null,
     selectedTests: tests,
-    results: []
+    results: [],
+    persistenceStatus: "pending"
   };
-
-  const runningRows = tests.map(t => ({ testType: t, target: resolveTarget(t).value, origin: resolveTarget(t).origin, status: "running", durationMs: null, reason: "" }));
-  renderResults(runningRows);
-
+  renderResults(tests.map((t) => ({ testType: t, target: resolveTarget(t).value, origin: resolveTarget(t).origin, status: "running", durationMs: null })));
   for (const testType of tests) {
     const result = await runOne(testType, timeoutMs);
     run.results.push(result);
-    const incremental = tests.map(t => run.results.find(r => r.testType === t) || { testType: t, target: resolveTarget(t).value, origin: resolveTarget(t).origin, status: "running", durationMs: null, reason: "" });
-    renderResults(incremental);
+    renderResults(tests.map((t) => run.results.find((r) => r.testType === t) || ({ testType: t, target: resolveTarget(t).value, origin: resolveTarget(t).origin, status: "running", durationMs: null })));
   }
-
   run.finishedAt = nowIso();
+  await uploadRun(run);
   runHistory.unshift(run);
-  runHistory = runHistory.slice(0, 20);
+  runHistory = runHistory.slice(0, 30);
   saveHistory();
   renderHistory();
 }
@@ -288,9 +474,10 @@ async function loadConfig() {
   document.getElementById("timeout").value = config.per_test_timeout_ms || 15000;
   document.getElementById("config-summary").textContent =
     `Public access: ${config.public_access ? "enabled" : "disabled"} | Custom targets: ${config.allow_custom_targets ? "enabled" : "disabled"} | Rate limiting: ${config.rate_limiting_enabled ? "enabled" : "disabled"}`;
-
+  document.getElementById("turn-profile-summary").textContent =
+    `TURN profile: ${config.turn_payload_size_bytes || 1024} bytes @ ${config.turn_messages_per_second || 20} msg/s for ${config.turn_transfer_window_seconds || 10}s · quality threshold ${(100 * (config.turn_quality_threshold_ratio || 0.9)).toFixed(0)}%`;
   const select = document.getElementById("default-targets");
-  select.innerHTML = (config.default_targets || []).map(t =>
+  select.innerHTML = (config.default_targets || []).map((t) =>
     `<option value="${escapeHtml(t.value)}">${escapeHtml(t.test_type)} - ${escapeHtml(t.label)} (${escapeHtml(t.value)})</option>`
   ).join("");
 }

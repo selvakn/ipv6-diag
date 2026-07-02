@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import selvakn.ipv6diag.R
 import selvakn.ipv6diag.data.model.AddressFamily
 import selvakn.ipv6diag.data.model.DiagnosticSession
 import selvakn.ipv6diag.data.model.ServerEndpoint
@@ -48,6 +49,11 @@ class DiagnosticRunner(
     ): DiagnosticSession = coroutineScope {
         val (targetHost, customPort) = parseHostAndPort(endpoint.hostname)
         val stunTurnPort = customPort ?: 3478
+        val transferWindowSeconds = context.resources.getInteger(R.integer.turn_transfer_window_seconds)
+        val transferPayloadBytes = context.resources.getInteger(R.integer.turn_transfer_payload_size_bytes)
+        val transferMessagesPerSecond = context.resources.getInteger(R.integer.turn_transfer_messages_per_second)
+        val transferQualityThreshold = context.resources
+            .getInteger(R.integer.turn_transfer_quality_threshold_percent) / 100f
         val sessionId = UUID.randomUUID().toString()
         val networkInfo = networkInfoCollector.collect(network)
         val networkChanged = AtomicBoolean(false)
@@ -120,8 +126,32 @@ class DiagnosticRunner(
                         }
                     }
                     TestType.TURN -> buildList {
-                        if (ipv4Addr != null) add(runTurnTest(network, sessionId, ipv4Addr, stunTurnPort, AddressFamily.IPv4))
-                        if (ipv6Addr != null) add(runTurnTest(network, sessionId, ipv6Addr, stunTurnPort, AddressFamily.IPv6))
+                        if (ipv4Addr != null) add(
+                            runTurnTest(
+                                network = network,
+                                sessionId = sessionId,
+                                targetIp = ipv4Addr,
+                                targetPort = stunTurnPort,
+                                addressFamily = AddressFamily.IPv4,
+                                transferWindowSeconds = transferWindowSeconds,
+                                payloadSizeBytes = transferPayloadBytes,
+                                messagesPerSecond = transferMessagesPerSecond,
+                                qualityThresholdRatio = transferQualityThreshold,
+                            )
+                        )
+                        if (ipv6Addr != null) add(
+                            runTurnTest(
+                                network = network,
+                                sessionId = sessionId,
+                                targetIp = ipv6Addr,
+                                targetPort = stunTurnPort,
+                                addressFamily = AddressFamily.IPv6,
+                                transferWindowSeconds = transferWindowSeconds,
+                                payloadSizeBytes = transferPayloadBytes,
+                                messagesPerSecond = transferMessagesPerSecond,
+                                qualityThresholdRatio = transferQualityThreshold,
+                            )
+                        )
                         if (isEmpty()) {
                             add(
                                 TestResult(

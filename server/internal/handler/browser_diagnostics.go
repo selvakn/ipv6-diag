@@ -38,6 +38,10 @@ type browserDiagConfigResponse struct {
 	RateLimiting       bool                `json:"rate_limiting_enabled"`
 	DefaultTargets     []browserDiagTarget `json:"default_targets"`
 	TurnCredentialMode string              `json:"turn_credential_mode"`
+	TurnWindowSeconds  int                 `json:"turn_transfer_window_seconds"`
+	TurnPayloadBytes   int                 `json:"turn_payload_size_bytes"`
+	TurnMessagesPerSec int                 `json:"turn_messages_per_second"`
+	TurnQualityMin     float64             `json:"turn_quality_threshold_ratio"`
 }
 
 func (h *BrowserDiagnosticsConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +57,10 @@ func (h *BrowserDiagnosticsConfigHandler) ServeHTTP(w http.ResponseWriter, r *ht
 		RateLimiting:       false,
 		DefaultTargets:     loadDefaultBrowserTargets(),
 		TurnCredentialMode: resolveTurnCredentialMode(),
+		TurnWindowSeconds:  envInt("BROWSER_DIAG_TURN_WINDOW_SECONDS", 10),
+		TurnPayloadBytes:   envInt("BROWSER_DIAG_TURN_PAYLOAD_BYTES", 1024),
+		TurnMessagesPerSec: envInt("BROWSER_DIAG_TURN_MESSAGES_PER_SEC", 20),
+		TurnQualityMin:     envFloat("BROWSER_DIAG_TURN_QUALITY_THRESHOLD_RATIO", 0.90),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -142,4 +150,16 @@ func envOr(name, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func envFloat(name string, fallback float64) float64 {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(v, 64)
+	if err != nil || parsed <= 0 || parsed > 1 {
+		return fallback
+	}
+	return parsed
 }

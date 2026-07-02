@@ -21,5 +21,12 @@ data class TestResult(
     val serverConfirmedFamily: String? = null,
     val packetLoss: Float? = null,
     val iceCandidates: List<String> = emptyList(),
+    val transferRateKbps: Double? = null,
+    val bytesSent: Long? = null,
+    val bytesReceived: Long? = null,
+    val deliveryQualityRatio: Float? = null,
+    val qualityThresholdRatio: Float? = null,
+    val transferWindowSeconds: Int? = null,
+    val payloadProfile: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
 )

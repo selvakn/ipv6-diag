@@ -99,6 +99,13 @@ data class TestResultEntity(
     @ColumnInfo(name = "server_confirmed_family") val serverConfirmedFamily: String? = null,
     @ColumnInfo(name = "packet_loss") val packetLoss: Float? = null,
     @ColumnInfo(name = "ice_candidates") val iceCandidates: List<String> = emptyList(),
+    @ColumnInfo(name = "transfer_rate_kbps") val transferRateKbps: Double? = null,
+    @ColumnInfo(name = "bytes_sent") val bytesSent: Long? = null,
+    @ColumnInfo(name = "bytes_received") val bytesReceived: Long? = null,
+    @ColumnInfo(name = "delivery_quality_ratio") val deliveryQualityRatio: Float? = null,
+    @ColumnInfo(name = "quality_threshold_ratio") val qualityThresholdRatio: Float? = null,
+    @ColumnInfo(name = "transfer_window_seconds") val transferWindowSeconds: Int? = null,
+    @ColumnInfo(name = "payload_profile") val payloadProfile: String? = null,
     val timestamp: Long,
 ) {
     fun toModel() = TestResult(
@@ -113,6 +120,13 @@ data class TestResultEntity(
         serverConfirmedFamily = serverConfirmedFamily,
         packetLoss = packetLoss,
         iceCandidates = iceCandidates,
+        transferRateKbps = transferRateKbps,
+        bytesSent = bytesSent,
+        bytesReceived = bytesReceived,
+        deliveryQualityRatio = deliveryQualityRatio,
+        qualityThresholdRatio = qualityThresholdRatio,
+        transferWindowSeconds = transferWindowSeconds,
+        payloadProfile = payloadProfile,
         timestamp = timestamp,
     )
 }
@@ -152,5 +166,12 @@ fun TestResult.toEntity() = TestResultEntity(
     serverConfirmedFamily = serverConfirmedFamily,
     packetLoss = packetLoss,
     iceCandidates = iceCandidates,
+    transferRateKbps = transferRateKbps,
+    bytesSent = bytesSent,
+    bytesReceived = bytesReceived,
+    deliveryQualityRatio = deliveryQualityRatio,
+    qualityThresholdRatio = qualityThresholdRatio,
+    transferWindowSeconds = transferWindowSeconds,
+    payloadProfile = payloadProfile,
     timestamp = timestamp,
 )
