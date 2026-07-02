@@ -1,0 +1,8 @@
+capabilities:
+    - ssh
+    - network
+    - github
+    - go
+    - fly
+    - mise
+    - android
