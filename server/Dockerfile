@@ -10,10 +10,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates curl
 COPY --from=builder /build/server /server
-EXPOSE 80 443 3478/tcp 3478/udp
+ENV APP_HTTP_PORT=8080
+EXPOSE 8080 3478/tcp 3478/udp
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
-    CMD curl -sf http://localhost:80/health || exit 1
+    CMD curl -sf http://localhost:8080/health || exit 1
 ENTRYPOINT ["/server"]
 # Production default: store DB on the mounted volume.
-# Override via docker-compose `command:` for local dev.
+# APP_HTTP_PORT controls HTTP bind port (IPv4 + IPv6 defaults).
 CMD ["--db", "/data/reports.db"]

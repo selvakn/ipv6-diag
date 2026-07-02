@@ -24,8 +24,9 @@ import (
 var version = "dev"
 
 func main() {
-	httpAddr := flag.String("http-addr", "0.0.0.0:80", "IPv4 HTTP listen address")
-	http6Addr := flag.String("http6-addr", "[::]:80", "IPv6 HTTP listen address")
+	httpPort := envOrDefault("APP_HTTP_PORT", "80")
+	httpAddr := flag.String("http-addr", "0.0.0.0:"+httpPort, "IPv4 HTTP listen address")
+	http6Addr := flag.String("http6-addr", "[::]:"+httpPort, "IPv6 HTTP listen address")
 	httpsAddr := flag.String("https-addr", "0.0.0.0:443", "IPv4 HTTPS listen address")
 	https6Addr := flag.String("https6-addr", "[::]:443", "IPv6 HTTPS listen address")
 	certFile := flag.String("cert", "", "Path to TLS certificate file (PEM)")
@@ -197,4 +198,12 @@ func main() {
 	defer cancel()
 	listeners.CloseAll()
 	log.Println("Server stopped.")
+}
+
+func envOrDefault(key, fallback string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	return v
 }

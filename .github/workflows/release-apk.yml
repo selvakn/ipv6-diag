@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write   # create GitHub Releases and upload assets
+  packages: write   # publish ghcr container images
 
 jobs:
   build:
@@ -59,3 +60,37 @@ jobs:
             -H "Content-Type: application/vnd.android.package-archive" \
             --data-binary @android/app/build/outputs/apk/release/app-release.apk \
             https://androidipv6diag.fly.dev/upload-apk
+
+  publish-container:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract container metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/androidipv6diag-server
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest
+
+      - name: Build and push server container
+        uses: docker/build-push-action@v6
+        with:
+          context: ./server
+          file: ./server/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
