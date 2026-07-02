@@ -43,6 +43,18 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
     }
 }
 
+val MIGRATION_5_6 = object : Migration(5, 6) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE test_results ADD COLUMN transfer_rate_kbps REAL")
+        db.execSQL("ALTER TABLE test_results ADD COLUMN bytes_sent INTEGER")
+        db.execSQL("ALTER TABLE test_results ADD COLUMN bytes_received INTEGER")
+        db.execSQL("ALTER TABLE test_results ADD COLUMN delivery_quality_ratio REAL")
+        db.execSQL("ALTER TABLE test_results ADD COLUMN quality_threshold_ratio REAL")
+        db.execSQL("ALTER TABLE test_results ADD COLUMN transfer_window_seconds INTEGER")
+        db.execSQL("ALTER TABLE test_results ADD COLUMN payload_profile TEXT")
+    }
+}
+
 @Database(
     entities = [
         DiagnosticSessionEntity::class,
@@ -50,7 +62,7 @@ val MIGRATION_4_5 = object : Migration(4, 5) {
         ServerEndpointEntity::class,
         XlatSummaryEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 @TypeConverters(Converters::class)
@@ -69,7 +81,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "ipv6diag.db",
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6).build().also { INSTANCE = it }
             }
     }
 }

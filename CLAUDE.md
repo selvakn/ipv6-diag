@@ -1,5 +1,5 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/007-browser-network-tests/plan.md
+at specs/008-turn-transfer-metrics/plan.md
 <!-- SPECKIT END -->

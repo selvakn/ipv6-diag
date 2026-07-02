@@ -37,6 +37,10 @@ func TestBrowserDiagnosticsConfigHandlerPayload(t *testing.T) {
 	t.Setenv("TURN_ENABLED", "true")
 	t.Setenv("TURN_CREDENTIALS_TOKEN", "")
 	t.Setenv("BROWSER_DIAG_HTTP_TARGET", "http://localhost:8080/diag")
+	t.Setenv("BROWSER_DIAG_TURN_WINDOW_SECONDS", "10")
+	t.Setenv("BROWSER_DIAG_TURN_PAYLOAD_BYTES", "1200")
+	t.Setenv("BROWSER_DIAG_TURN_MESSAGES_PER_SEC", "30")
+	t.Setenv("BROWSER_DIAG_TURN_QUALITY_THRESHOLD_RATIO", "0.85")
 
 	h := &BrowserDiagnosticsConfigHandler{}
 	req := httptest.NewRequest(http.MethodGet, "/browser-diagnostics/config", nil)
@@ -62,6 +66,18 @@ func TestBrowserDiagnosticsConfigHandlerPayload(t *testing.T) {
 	}
 	if payload.DefaultTargets[0].Value != "http://localhost:8080/diag" {
 		t.Fatalf("unexpected default HTTP target: %s", payload.DefaultTargets[0].Value)
+	}
+	if payload.TurnWindowSeconds != 10 {
+		t.Fatalf("expected turn window 10, got %d", payload.TurnWindowSeconds)
+	}
+	if payload.TurnPayloadBytes != 1200 {
+		t.Fatalf("expected turn payload 1200, got %d", payload.TurnPayloadBytes)
+	}
+	if payload.TurnMessagesPerSec != 30 {
+		t.Fatalf("expected turn messages/sec 30, got %d", payload.TurnMessagesPerSec)
+	}
+	if payload.TurnQualityMin != 0.85 {
+		t.Fatalf("expected turn quality threshold 0.85, got %f", payload.TurnQualityMin)
 	}
 }
 

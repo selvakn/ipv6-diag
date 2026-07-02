@@ -262,6 +262,17 @@ private fun TestResultCard(result: TestResult, testEndpointHost: String) {
             if (result.testType.name == "STUN" || result.testType.name == "TURN") {
                 Text("Probe target: $testEndpointHost", style = MaterialTheme.typography.bodySmall)
             }
+            result.transferRateKbps?.let { Text("Transfer rate: ${"%.1f".format(it)} kbps", style = MaterialTheme.typography.bodySmall) }
+            result.bytesSent?.let { Text("Bytes sent: $it", style = MaterialTheme.typography.bodySmall) }
+            result.bytesReceived?.let { Text("Bytes received: $it", style = MaterialTheme.typography.bodySmall) }
+            if (result.deliveryQualityRatio != null && result.qualityThresholdRatio != null) {
+                Text(
+                    "Delivery quality: ${(result.deliveryQualityRatio * 100).toInt()}% (min ${(result.qualityThresholdRatio * 100).toInt()}%)",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            result.transferWindowSeconds?.let { Text("Transfer window: ${it}s", style = MaterialTheme.typography.bodySmall) }
+            result.payloadProfile?.let { Text("Payload profile: $it", style = MaterialTheme.typography.bodySmall) }
             result.packetLoss?.let { Text("Packet loss: ${(it * 100).toInt()}%", style = MaterialTheme.typography.bodySmall) }
             result.resolvedAddress?.let { Text("Address: $it", style = MaterialTheme.typography.bodySmall) }
             if (result.iceCandidates.isNotEmpty()) {

@@ -15,6 +15,10 @@ All tests execute from the browser client context. This release is intentionally
 - `BROWSER_DIAG_ICMP_TARGET` (default `https://ipv6-diag.r.selvakn.in/diag`)
 - `BROWSER_DIAG_STUN_TARGET` (default `stun:ipv6-diag.r.selvakn.in:3478`)
 - `BROWSER_DIAG_TURN_TARGET` (default `turn:ipv6-diag.r.selvakn.in:3478?transport=udp`)
+- `BROWSER_DIAG_TURN_WINDOW_SECONDS` (default `10`)
+- `BROWSER_DIAG_TURN_PAYLOAD_BYTES` (default `1024`)
+- `BROWSER_DIAG_TURN_MESSAGES_PER_SEC` (default `20`)
+- `BROWSER_DIAG_TURN_QUALITY_THRESHOLD_RATIO` (default `0.90`)
 
 ## TURN runtime configuration
 

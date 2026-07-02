@@ -5,4 +5,8 @@
     <integer name="default_https_port">443</integer>
     <integer name="max_session_history">50</integer>
     <integer name="cellular_network_timeout_seconds">10</integer>
+    <integer name="turn_transfer_window_seconds">10</integer>
+    <integer name="turn_transfer_payload_size_bytes">1024</integer>
+    <integer name="turn_transfer_messages_per_second">20</integer>
+    <integer name="turn_transfer_quality_threshold_percent">90</integer>
 </resources>
