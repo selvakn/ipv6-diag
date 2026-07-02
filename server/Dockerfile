@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates curl
 COPY --from=builder /build/server /server
-EXPOSE 80 443
+EXPOSE 80 443 3478/tcp 3478/udp
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
     CMD curl -sf http://localhost:80/health || exit 1
 ENTRYPOINT ["/server"]

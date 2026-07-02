@@ -18,6 +18,7 @@ import (
 	"github.com/selvakn/ipv6diag-server/internal/handler"
 	"github.com/selvakn/ipv6diag-server/internal/listener"
 	"github.com/selvakn/ipv6diag-server/internal/store"
+	turnsvc "github.com/selvakn/ipv6diag-server/internal/turn"
 )
 
 var version = "dev"
@@ -48,6 +49,22 @@ func main() {
 	defer db.Close()
 	reportStore := store.NewReportStore(db)
 	reportsHandler := &handler.ReportsHandler{Store: reportStore}
+	turnCfg := turnsvc.LoadConfigFromEnv()
+	turnCredentials := turnsvc.NewCredentialManager(turnCfg.Realm, turnCfg.CredentialTTL)
+	turnService := turnsvc.NewService(turnCfg, turnCredentials)
+	if err := turnService.Start(); err != nil {
+		log.Fatalf("failed to start TURN service: %v", err)
+	}
+	defer func() {
+		if err := turnService.Stop(); err != nil {
+			log.Printf("failed to stop TURN service: %v", err)
+		}
+	}()
+	turnHandler := &handler.TurnCredentialsHandler{
+		Token:       turnCfg.CredentialsToken,
+		Credentials: turnCredentials,
+		Service:     turnService,
+	}
 
 	// Store the published APK alongside the database on the data volume.
 	apkHandler := &handler.APKHandler{
@@ -66,6 +83,7 @@ func main() {
 	httpMux.Handle("/upload-apk", apkHandler)
 	httpMux.Handle("/download/apk", apkHandler)
 	httpMux.Handle("/apk-info", apkHandler)
+	httpMux.Handle("/turn/credentials", turnHandler)
 
 	tlsMux := http.NewServeMux()
 	tlsMux.Handle("/diag", &handler.DiagHandler{IsTLS: true})
@@ -77,6 +95,7 @@ func main() {
 	tlsMux.Handle("/upload-apk", apkHandler)
 	tlsMux.Handle("/download/apk", apkHandler)
 	tlsMux.Handle("/apk-info", apkHandler)
+	tlsMux.Handle("/turn/credentials", turnHandler)
 
 	// Resolve TLS config: CertMagic (HTTPS_HOST) > manual cert/key > none
 	var tlsCfg *tls.Config
@@ -157,6 +176,11 @@ func main() {
 
 	if httpsHost == "" && (*certFile == "" || *keyFile == "") {
 		log.Println("No TLS configured — HTTPS disabled. Set HTTPS_HOST env var for automatic certs.")
+	}
+	if turnCfg.Enabled {
+		log.Printf("TURN enabled (realm=%s, active_leases=%d)", turnCfg.Realm, turnCredentials.ActiveCount())
+	} else {
+		log.Println("TURN disabled")
 	}
 
 	quit := make(chan os.Signal, 1)
