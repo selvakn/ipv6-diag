@@ -59,7 +59,7 @@ suspend fun uploadReport(
         val body = json.encodeToString(CloudUploadRequest.serializer(), payload)
             .toRequestBody("application/json".toMediaType())
         val request = Request.Builder()
-            .url("$serverUrl/reports")
+            .url("$serverUrl/api/reports")
             .post(body)
             .build()
         val response = client.newCall(request).execute()

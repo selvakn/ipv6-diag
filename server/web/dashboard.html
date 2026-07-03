@@ -71,10 +71,10 @@
 
 <script>
 let allReports = [];
-const DASHBOARD_BASE = '/dashboard';
+const DASHBOARD_BASE = '/reports';
 
 function getReportIdFromPath() {
-  const m = window.location.pathname.match(/^\/dashboard\/([^\/]+)$/);
+  const m = window.location.pathname.match(/^\/reports\/([^\/]+)$/);
   return m ? decodeURIComponent(m[1]) : '';
 }
 
@@ -94,7 +94,7 @@ async function loadReports(from, to, device) {
   if (from) params.set('from', from);
   if (to) params.set('to', to);
   if (device) params.set('device', device);
-  const r = await fetch('/reports?' + params);
+  const r = await fetch('/api/reports?' + params);
   const data = await r.json();
   return data.reports || [];
 }
@@ -138,7 +138,7 @@ async function showDetail(id, pushHistory = false) {
     }
   }
 
-  const r = await fetch('/reports/' + id);
+  const r = await fetch('/api/reports/' + id);
   if (!r.ok) {
     detailView.innerHTML = `<button class="back-btn" onclick="backToList()">&#8592; Back to list</button><div class="empty">Report not found.</div>`;
     return;

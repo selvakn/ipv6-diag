@@ -14,8 +14,8 @@ type ReportsHandler struct {
 }
 
 func (h *ReportsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Route: /reports and /reports/{id}
-	path := strings.TrimPrefix(r.URL.Path, "/reports")
+	// Route: /api/reports and /api/reports/{id}
+	path := strings.TrimPrefix(r.URL.Path, "/api/reports")
 	path = strings.TrimPrefix(path, "/")
 
 	switch {

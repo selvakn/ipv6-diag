@@ -28,11 +28,31 @@
   .hint { color: #4b5563; font-size: 0.84rem; }
   .history-item { border: 1px solid #e5e9ef; border-radius: 6px; padding: 8px; margin-bottom: 8px; cursor: pointer; }
   .history-item:hover { background: #f9fafb; }
+  .ip-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 8px; }
+  .ip-cell { background: #f0f4ff; border-radius: 6px; padding: 10px 14px; }
+  .ip-cell .ip-label { font-size: 0.78rem; color: #4b5563; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .ip-cell .ip-value { font-size: 0.95rem; font-family: monospace; color: #111827; word-break: break-all; }
+  .ip-cell .ip-value.loading { color: #9ca3af; font-style: italic; font-family: inherit; }
+  .ip-cell .ip-value.unavailable { color: #ef4444; font-family: inherit; font-style: italic; }
 </style>
 </head>
 <body>
 <header><h1>Browser Network Diagnostics</h1></header>
 <main>
+  <section class="card">
+    <div class="row"><strong>My IP Addresses</strong></div>
+    <div class="ip-grid">
+      <div class="ip-cell">
+        <div class="ip-label">IPv4</div>
+        <div class="ip-value loading" id="ip-v4">Detecting…</div>
+      </div>
+      <div class="ip-cell">
+        <div class="ip-label">IPv6</div>
+        <div class="ip-value loading" id="ip-v6">Detecting…</div>
+      </div>
+    </div>
+  </section>
+
   <section class="card">
     <div class="row"><strong>Configuration</strong></div>
     <div class="row hint" id="config-summary">Loading configuration...</div>
@@ -553,7 +573,7 @@ async function uploadRun(run) {
     test_endpoint: new URL(window.location.href).host
   };
   try {
-    const resp = await fetch("/reports", {
+    const resp = await fetch("/api/reports", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -608,6 +628,7 @@ async function loadConfig() {
   select.innerHTML = (config.default_targets || []).map((t) =>
     `<option value="${escapeHtml(t.value)}">${escapeHtml(t.test_type)} - ${escapeHtml(t.label)} (${escapeHtml(t.value)})</option>`
   ).join("");
+  detectIPs(config.ip_detect_v4_url, config.ip_detect_v6_url);
 }
 
 document.getElementById("run-btn").addEventListener("click", runSelectedTests);
@@ -623,6 +644,55 @@ renderHistory();
 loadConfig().catch((err) => {
   document.getElementById("run-error").textContent = "Failed to load configuration: " + err;
 });
+
+async function fetchMyIP(url) {
+  const r = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return await r.json();
+}
+
+async function detectIPs(v4Url, v6Url) {
+  const v4El = document.getElementById("ip-v4");
+  const v6El = document.getElementById("ip-v6");
+
+  if (v4Url && v6Url) {
+    // Dedicated IPv4-only and IPv6-only endpoints — fetch both in parallel.
+    const [v4Result, v6Result] = await Promise.allSettled([
+      fetchMyIP(v4Url),
+      fetchMyIP(v6Url),
+    ]);
+    if (v4Result.status === "fulfilled") {
+      v4El.textContent = v4Result.value.ip || "Unknown";
+      v4El.className = "ip-value";
+    } else {
+      v4El.textContent = "Not available";
+      v4El.className = "ip-value unavailable";
+    }
+    if (v6Result.status === "fulfilled") {
+      v6El.textContent = v6Result.value.ip || "Unknown";
+      v6El.className = "ip-value";
+    } else {
+      v6El.textContent = "Not available";
+      v6El.className = "ip-value unavailable";
+    }
+  } else {
+    // No split-DNS configured — single call; show whichever protocol was used.
+    try {
+      const data = await fetchMyIP("/my-ip");
+      const ip = data.ip || "";
+      if (data.family === "IPv6") {
+        v6El.textContent = ip; v6El.className = "ip-value";
+        v4El.textContent = "Not detected on this connection"; v4El.className = "ip-value unavailable";
+      } else {
+        v4El.textContent = ip; v4El.className = "ip-value";
+        v6El.textContent = "Not detected on this connection"; v6El.className = "ip-value unavailable";
+      }
+    } catch {
+      v4El.textContent = "Detection failed"; v4El.className = "ip-value unavailable";
+      v6El.textContent = "Detection failed"; v6El.className = "ip-value unavailable";
+    }
+  }
+}
 </script>
 </body>
 </html>

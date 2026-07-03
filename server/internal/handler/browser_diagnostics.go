@@ -42,6 +42,8 @@ type browserDiagConfigResponse struct {
 	TurnPayloadBytes   int                 `json:"turn_payload_size_bytes"`
 	TurnMessagesPerSec int                 `json:"turn_messages_per_second"`
 	TurnQualityMin     float64             `json:"turn_quality_threshold_ratio"`
+	IPDetectV4URL      string              `json:"ip_detect_v4_url"`
+	IPDetectV6URL      string              `json:"ip_detect_v6_url"`
 }
 
 func (h *BrowserDiagnosticsConfigHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +63,8 @@ func (h *BrowserDiagnosticsConfigHandler) ServeHTTP(w http.ResponseWriter, r *ht
 		TurnPayloadBytes:   envInt("BROWSER_DIAG_TURN_PAYLOAD_BYTES", 1024),
 		TurnMessagesPerSec: envInt("BROWSER_DIAG_TURN_MESSAGES_PER_SEC", 20),
 		TurnQualityMin:     envFloat("BROWSER_DIAG_TURN_QUALITY_THRESHOLD_RATIO", 0.90),
+		IPDetectV4URL:      envOr("BROWSER_DIAG_IP_DETECT_V4_URL", "https://4.ipv6-diag.selvakn.in/my-ip"),
+		IPDetectV6URL:      envOr("BROWSER_DIAG_IP_DETECT_V6_URL", "https://6.ipv6-diag.selvakn.in/my-ip"),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -84,34 +88,34 @@ func loadDefaultBrowserTargets() []browserDiagTarget {
 		{
 			TestType:         "HTTP",
 			Label:            "Default HTTP",
-			Value:            envOr("BROWSER_DIAG_HTTP_TARGET", "http://ipv6-diag.r.selvakn.in/diag"),
+			Value:            envOr("BROWSER_DIAG_HTTP_TARGET", "http://ipv6-diag.selvakn.in/diag"),
 			Origin:           "default",
 			EnabledByDefault: true,
 		},
 		{
 			TestType:         "HTTPS",
 			Label:            "Default HTTPS",
-			Value:            envOr("BROWSER_DIAG_HTTPS_TARGET", "https://ipv6-diag.r.selvakn.in/diag"),
+			Value:            envOr("BROWSER_DIAG_HTTPS_TARGET", "https://ipv6-diag.selvakn.in/diag"),
 			Origin:           "default",
 			EnabledByDefault: true,
 		},
 		{
 			TestType:         "ICMP_EQUIV",
 			Label:            "Default Reachability",
-			Value:            envOr("BROWSER_DIAG_ICMP_TARGET", "https://ipv6-diag.r.selvakn.in/diag"),
+			Value:            envOr("BROWSER_DIAG_ICMP_TARGET", "https://ipv6-diag.selvakn.in/diag"),
 			Origin:           "default",
 			EnabledByDefault: true,
 		},
 		{
 			TestType:         "STUN",
 			Label:            "Default STUN",
-			Value:            envOr("BROWSER_DIAG_STUN_TARGET", "stun:ipv6-diag.r.selvakn.in:3478"),
+			Value:            envOr("BROWSER_DIAG_STUN_TARGET", "stun:ipv6-diag.selvakn.in:3478"),
 			Origin:           "default",
 			EnabledByDefault: true,
 		},
 	}
 
-	if turnTarget := strings.TrimSpace(envOr("BROWSER_DIAG_TURN_TARGET", "turn:ipv6-diag.r.selvakn.in:3478?transport=udp")); turnTarget != "" {
+	if turnTarget := strings.TrimSpace(envOr("BROWSER_DIAG_TURN_TARGET", "turn:ipv6-diag.selvakn.in:3478?transport=udp")); turnTarget != "" {
 		targets = append(targets, browserDiagTarget{
 			TestType:         "TURN",
 			Label:            "Default TURN",
