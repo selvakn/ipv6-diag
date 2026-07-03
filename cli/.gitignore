@@ -1,0 +1,5 @@
+ipv6diag
+ipv6diag-*
+*.exe
+*.test
+vendor/
