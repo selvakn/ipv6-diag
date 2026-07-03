@@ -38,7 +38,15 @@ Minimum Android version: depends on the release APK (check the release notes).
 
 ### CLI
 
-Download a pre-built binary for your platform from the [Releases](https://github.com/selvakn/ipv6-diag/releases) page. The binary is statically linked with no runtime dependencies.
+**Install (Linux and macOS):**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/selvakn/ipv6-diag/main/install.sh | bash
+```
+
+Installs to `/usr/local/bin/ipv6diag`. Override the destination with `INSTALL_DIR=/your/path bash` before the pipe.
+
+Or download a binary directly from the [Releases](https://github.com/selvakn/ipv6-diag/releases) page. The binary is statically linked with no runtime dependencies.
 
 Available platforms:
 
