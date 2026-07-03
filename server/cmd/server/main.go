@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -37,6 +38,7 @@ func main() {
 	flag.Parse()
 
 	httpsHost := os.Getenv("HTTPS_HOST")
+	httpsHosts := splitHosts(httpsHost)
 
 	if *showVersion {
 		fmt.Println(version)
@@ -112,7 +114,7 @@ func main() {
 	var tlsCfg *tls.Config
 	var httpHandler http.Handler = httpMux
 
-	if httpsHost != "" {
+	if len(httpsHosts) > 0 {
 		certmagic.DefaultACME.Agreed = true
 		certmagic.Default.Storage = &certmagic.FileStorage{Path: *certmagicDir}
 		magic := certmagic.NewDefault()
@@ -123,11 +125,11 @@ func main() {
 		}
 
 		ctx := context.Background()
-		if err := magic.ManageSync(ctx, []string{httpsHost}); err != nil {
-			log.Fatalf("CertMagic failed to obtain certificate for %s: %v", httpsHost, err)
+		if err := magic.ManageSync(ctx, httpsHosts); err != nil {
+			log.Fatalf("CertMagic failed to obtain certificates for %v: %v", httpsHosts, err)
 		}
 		tlsCfg = magic.TLSConfig()
-		log.Printf("CertMagic: managing certificate for %s", httpsHost)
+		log.Printf("CertMagic: managing certificates for %v", httpsHosts)
 	} else if *certFile != "" && *keyFile != "" {
 		cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
 		if err != nil {
@@ -216,4 +218,17 @@ func envOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// splitHosts splits a comma-separated list of hostnames and returns the
+// non-empty trimmed entries. Accepts a single hostname for backward compat.
+func splitHosts(s string) []string {
+	var out []string
+	for _, h := range strings.Split(s, ",") {
+		h = strings.TrimSpace(h)
+		if h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
 }
