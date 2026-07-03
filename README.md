@@ -1,8 +1,8 @@
 # ipv6-diag
 
-A set of diagnostic tools for testing IPv6 connectivity and network path quality. Run tests from a browser, an Android device, or a command-line binary. Results upload to a shared dashboard for comparison across devices and network conditions.
+A set of diagnostic tools for testing IPv6 connectivity and network path quality. Run tests from a browser, an Android device, or a command-line binary.
 
-A hosted server is available at **https://ipv6-diag.selvakn.in** — no account or installation required to use the web client.
+A hosted server is available at **https://ipv6-diag.selvakn.in**.
 
 ---
 
@@ -26,21 +26,19 @@ Tests run over IPv4, IPv6, or both stacks, depending on the client and flags use
 
 ### Web
 
-Open **https://ipv6-diag.selvakn.in** in any browser. The page detects your IPv4 and IPv6 addresses using split-DNS probes, runs all five tests, and displays results inline. Results can be uploaded to the dashboard with one click.
-
-No installation required.
+Open **https://ipv6-diag.selvakn.in** in any browser. The page detects your IPv4 and IPv6 addresses using split-DNS probes, runs all five tests, and displays results inline.
 
 ### Android
 
 Download the latest APK from the [Releases](https://github.com/selvakn/ipv6-diag/releases) page.
 
-The Android client runs the same test suite and uploads results to the dashboard. It reports the device model, OS version, and network interface details alongside the test results, which makes it useful for comparing cellular vs. Wi-Fi connectivity on the same device.
+The Android client runs the same test suite and reports the device model, OS version, and network interface details alongside the test results, which makes it useful for comparing cellular vs. Wi-Fi connectivity on the same device.
 
 Minimum Android version: depends on the release APK (check the release notes).
 
 ### CLI
 
-Download a pre-built binary for your platform from the [Releases](https://github.com/selvakn/ipv6-diag/releases) page. No installation or runtime dependencies required — the binary is statically linked.
+Download a pre-built binary for your platform from the [Releases](https://github.com/selvakn/ipv6-diag/releases) page. The binary is statically linked with no runtime dependencies.
 
 Available platforms:
 
@@ -76,7 +74,7 @@ Available platforms:
 ./ipv6diag --server https://your-server.example.com
 ```
 
-**Upload results to the dashboard:**
+**Upload results:**
 
 ```
 ./ipv6diag --upload
@@ -101,18 +99,10 @@ Exit code is `0` if all tests pass, `1` if any test fails or times out, `2` for 
 | `--tests` | `http,https,icmp,stun,turn` | Comma-separated test subset |
 | `--timeout` | `15000` | Per-test timeout in milliseconds |
 | `--turn-token` | — | Bearer token for TURN credentials (or `TURN_TOKEN` env var) |
-| `--upload` | off | POST results to the server dashboard |
+| `--upload` | off | POST results to the server |
 | `--insecure` | off | Skip TLS verification (for local/staging servers) |
 | `--json` | off | Emit results as JSON instead of human-readable text |
 | `--version` | — | Print version and exit |
-
----
-
-## Dashboard
-
-All clients can upload results to the `/reports` dashboard on the target server. The dashboard lists past runs by session, device, and timestamp, and shows per-test pass/fail status, latency, and TURN transfer metrics.
-
-Hosted dashboard: **https://ipv6-diag.selvakn.in/reports**
 
 ---
 
@@ -169,7 +159,7 @@ cli/              Go CLI client
   main.go         Entry point and flag definitions
   diag/           HTTP, STUN, and TURN test implementations
   output/         Human-readable and JSON output
-  upload/         Dashboard upload
+  upload/         Result upload
 .github/workflows/
   release-apk.yml    Builds and publishes the Android APK on version tags
   release-cli.yml    Builds and publishes CLI binaries on version tags
