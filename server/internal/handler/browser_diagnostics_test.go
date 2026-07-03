@@ -116,3 +116,24 @@ func TestBrowserDiagnosticsConfigDefaultStunTurnTargets(t *testing.T) {
 		t.Fatalf("unexpected TURN default: %s", got)
 	}
 }
+
+func TestBrowserDiagnosticsConfigHandlerTokenRequiredMode(t *testing.T) {
+	t.Setenv("TURN_ENABLED", "true")
+	t.Setenv("TURN_CREDENTIALS_TOKEN", "secret")
+
+	h := &BrowserDiagnosticsConfigHandler{}
+	req := httptest.NewRequest(http.MethodGet, "/browser-diagnostics/config", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	var payload browserDiagConfigResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid payload: %v", err)
+	}
+	if payload.TurnCredentialMode != "token_required" {
+		t.Fatalf("expected token_required, got %s", payload.TurnCredentialMode)
+	}
+}

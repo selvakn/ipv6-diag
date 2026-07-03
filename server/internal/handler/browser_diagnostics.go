@@ -76,7 +76,7 @@ func resolveTurnCredentialMode() string {
 	if strings.TrimSpace(os.Getenv("TURN_CREDENTIALS_TOKEN")) == "" {
 		return "tokenless_endpoint"
 	}
-	return "none"
+	return "token_required"
 }
 
 func loadDefaultBrowserTargets() []browserDiagTarget {

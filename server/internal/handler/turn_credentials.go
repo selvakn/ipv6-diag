@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -45,7 +46,7 @@ func (h *TurnCredentialsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	uris := h.Service.ActiveURIs(r.Host)
+	uris := h.Service.ActiveURIs(hostWithoutPort(r.Host))
 	if len(uris) == 0 {
 		writeError(w, http.StatusServiceUnavailable, "no active turn listeners")
 		return
@@ -70,4 +71,16 @@ func (h *TurnCredentialsHandler) authorized(r *http.Request) bool {
 	}
 	auth := strings.TrimSpace(r.Header.Get("Authorization"))
 	return auth == "Bearer "+h.Token
+}
+
+func hostWithoutPort(hostport string) string {
+	hostport = strings.TrimSpace(hostport)
+	if hostport == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(hostport); err == nil {
+		return host
+	}
+	// If host has no port, keep it as-is.
+	return hostport
 }

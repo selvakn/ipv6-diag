@@ -161,8 +161,38 @@ async function runHttpLike(url, timeoutMs) {
 }
 
 function setupPeerBridge(pcA, pcB) {
-  pcA.onicecandidate = (e) => { if (e.candidate) pcB.addIceCandidate(e.candidate).catch(() => {}); };
-  pcB.onicecandidate = (e) => { if (e.candidate) pcA.addIceCandidate(e.candidate).catch(() => {}); };
+  const pendingAtoB = [];
+  const pendingBtoA = [];
+  let aRemoteReady = false;
+  let bRemoteReady = false;
+
+  pcA.onicecandidate = (e) => {
+    if (!e.candidate) return;
+    if (bRemoteReady) {
+      pcB.addIceCandidate(e.candidate).catch(() => {});
+    } else {
+      pendingAtoB.push(e.candidate);
+    }
+  };
+  pcB.onicecandidate = (e) => {
+    if (!e.candidate) return;
+    if (aRemoteReady) {
+      pcA.addIceCandidate(e.candidate).catch(() => {});
+    } else {
+      pendingBtoA.push(e.candidate);
+    }
+  };
+
+  return {
+    markARemoteReady: () => {
+      aRemoteReady = true;
+      while (pendingBtoA.length) pcA.addIceCandidate(pendingBtoA.shift()).catch(() => {});
+    },
+    markBRemoteReady: () => {
+      bRemoteReady = true;
+      while (pendingAtoB.length) pcB.addIceCandidate(pendingAtoB.shift()).catch(() => {});
+    }
+  };
 }
 
 function awaitOpen(channel, timeoutMs) {
@@ -181,27 +211,112 @@ function buildPayload(size, marker) {
   return arr;
 }
 
-async function runTurnTransfer(targetUrl, timeoutMs) {
+function isLocalhostHost(host) {
+  const h = String(host || "").toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
+}
+
+function sanitizeTurnUris(rawUris) {
+  const out = [];
+  for (const raw of (rawUris || [])) {
+    const input = String(raw || "").trim();
+    if (!input.toLowerCase().startsWith("turn:")) continue;
+    const withProto = input.replace(/^turn:/i, "turn://");
+    let parsed;
+    try {
+      parsed = new URL(withProto);
+    } catch (_) {
+      continue;
+    }
+    let host = parsed.hostname;
+    // Wildcard bind addresses are not routable — map to loopback as last resort.
+    // In production, the server should advertise its LAN/public IP instead.
+    if (host === "0.0.0.0") host = "127.0.0.1";
+    if (host === "::" || host === "[::]") host = "::1";
+    const port = parsed.port || "3478";
+    const hostForUri = host.includes(":") ? `[${host.replace(/^\[|\]$/g, "")}]` : host;
+    const rebuilt = `turn:${hostForUri}:${port}${parsed.search || ""}`;
+    out.push(rebuilt);
+  }
+  return [...new Set(out)];
+}
+
+// runTurnTransfer tests the embedded TURN relay server by creating two
+// RTCPeerConnections (relay-only) and measuring data transfer between them.
+// The TURN server URI and credentials are always fetched from /turn/credentials,
+// which reflects the currently running server instance.
+async function runTurnTransfer(_targetUrl, timeoutMs) {
   if (!window.RTCPeerConnection) {
     return { status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "WebRTC unavailable in browser" };
   }
   const startedAt = nowIso();
-  let creds = null;
-  if (config.turn_credential_mode === "tokenless_endpoint") {
-    try {
-      const resp = await fetch("/turn/credentials");
-      if (resp.ok) creds = await resp.json();
-    } catch (_) {}
-  }
-  const iceServer = { urls: [targetUrl] };
-  if (creds?.username && creds?.password) {
-    iceServer.username = creds.username;
-    iceServer.credential = creds.password;
+
+  // Fetch credentials and TURN URIs from the embedded server's credential endpoint.
+  // The credential response includes the actual TURN server addresses to use.
+  let creds;
+  try {
+    const resp = await fetch("/turn/credentials");
+    if (!resp.ok) {
+      return {
+        status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
+        reason: "TURN credential fetch failed (HTTP " + resp.status + ")"
+      };
+    }
+    creds = await resp.json();
+  } catch (err) {
+    return {
+      status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
+      reason: "TURN credential fetch error: " + String(err?.message || err)
+    };
   }
 
-  const pcA = new RTCPeerConnection({ iceServers: [iceServer], iceTransportPolicy: "relay" });
-  const pcB = new RTCPeerConnection({ iceServers: [iceServer], iceTransportPolicy: "relay" });
-  setupPeerBridge(pcA, pcB);
+  if (!(creds?.username && creds?.password)) {
+    return {
+      status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
+      reason: "TURN credentials missing (username/password)"
+    };
+  }
+  if (!Array.isArray(creds?.uris) || !creds.uris.length) {
+    return {
+      status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
+      reason: "TURN credential response has no URIs"
+    };
+  }
+
+  const turnUris = sanitizeTurnUris(creds.uris);
+  if (!turnUris.length) {
+    return {
+      status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
+      reason: "No usable TURN URIs after sanitization (raw: " + creds.uris.join(", ") + ")"
+    };
+  }
+
+  const iceServer = { urls: turnUris, username: creds.username, credential: creds.password };
+  // Browsers (Firefox, Chrome) block TURN allocation to private/RFC1918 IPs from a
+  // localhost page as a Local Network Access security measure. On localhost we relax
+  // to "all" so the two PeerConnections can still connect (via host candidates) and
+  // produce meaningful latency/throughput metrics. On a public origin, "relay" forces
+  // the connection to go through the TURN relay as intended.
+  const localPage = isLocalhostHost(window.location.hostname);
+  const iceTransportPolicy = localPage ? "all" : "relay";
+  const pcA = new RTCPeerConnection({ iceServers: [iceServer], iceTransportPolicy });
+  const pcB = new RTCPeerConnection({ iceServers: [iceServer], iceTransportPolicy });
+  const bridge = setupPeerBridge(pcA, pcB);
+  let connStateA = "new";
+  let connStateB = "new";
+  let iceStateA = "new";
+  let iceStateB = "new";
+  const iceErrors = [];
+  pcA.onconnectionstatechange = () => { connStateA = pcA.connectionState; };
+  pcB.onconnectionstatechange = () => { connStateB = pcB.connectionState; };
+  pcA.oniceconnectionstatechange = () => { iceStateA = pcA.iceConnectionState; };
+  pcB.oniceconnectionstatechange = () => { iceStateB = pcB.iceConnectionState; };
+  pcA.onicecandidateerror = (e) => {
+    iceErrors.push(`A:${e.errorCode || "?"}@${e.url || "unknown"}:${e.errorText || "ice-error"}`);
+  };
+  pcB.onicecandidateerror = (e) => {
+    iceErrors.push(`B:${e.errorCode || "?"}@${e.url || "unknown"}:${e.errorText || "ice-error"}`);
+  };
 
   const channelAB = pcA.createDataChannel("ab", { ordered: true });
   const channelBA = pcB.createDataChannel("ba", { ordered: true });
@@ -215,13 +330,24 @@ async function runTurnTransfer(targetUrl, timeoutMs) {
     const offer = await pcA.createOffer();
     await pcA.setLocalDescription(offer);
     await pcB.setRemoteDescription(offer);
+    bridge.markBRemoteReady();
     const answer = await pcB.createAnswer();
     await pcB.setLocalDescription(answer);
     await pcA.setRemoteDescription(answer);
+    bridge.markARemoteReady();
     await Promise.race([Promise.all([awaitOpen(channelAB, timeoutMs), awaitOpen(channelBA, timeoutMs)]), timeoutPromise(timeoutMs)]);
   } catch (err) {
     pcA.close(); pcB.close();
-    return { status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt), reason: "TURN peer setup failed: " + String(err?.message || err) };
+    const iceErrorText = iceErrors.length ? ` | iceErrors=${iceErrors.join("; ")}` : "";
+    return {
+      status: "failed",
+      target: turnUris.join(" "),
+      startedAt,
+      endedAt: nowIso(),
+      durationMs: msSince(startedAt),
+      reason: "TURN peer setup failed: " + String(err?.message || err) +
+        ` (pcA=${connStateA}/${iceStateA}, pcB=${connStateB}/${iceStateB})` + iceErrorText
+    };
   }
 
   const rtts = [];
@@ -313,8 +439,10 @@ async function runTurnTransfer(targetUrl, timeoutMs) {
   const status = passed ? "passed" : "failed";
   const reason = passed ? "" : "Delivery quality below threshold or transfer window incomplete";
 
+  const modeNote = localPage ? " (host-candidate mode; relay blocked on localhost)" : " (relay-only)";
   return {
     status,
+    target: turnUris.join(" "),
     startedAt,
     endedAt: nowIso(),
     durationMs: elapsedMs,
@@ -327,7 +455,7 @@ async function runTurnTransfer(targetUrl, timeoutMs) {
     transferWindowSeconds: windowSec,
     payloadProfile: `${config.turn_payload_size_bytes || 1024}B@${mps}Hz`,
     reason,
-    evidence: passed ? "Two TURN clients exchanged data for 10s" : ""
+    evidence: passed ? `Two clients exchanged data for ${windowSec}s` + modeNote : ""
   };
 }
 

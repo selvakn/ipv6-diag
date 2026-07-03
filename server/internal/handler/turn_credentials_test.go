@@ -73,3 +73,21 @@ func TestTurnCredentialsResponseSchema(t *testing.T) {
 		t.Fatalf("marshal returned empty body")
 	}
 }
+
+func TestHostWithoutPort(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "localhost:6080", want: "localhost"},
+		{in: "127.0.0.1:8080", want: "127.0.0.1"},
+		{in: "[::1]:8080", want: "::1"},
+		{in: "example.com", want: "example.com"},
+		{in: "", want: ""},
+	}
+	for _, tc := range cases {
+		if got := hostWithoutPort(tc.in); got != tc.want {
+			t.Fatalf("hostWithoutPort(%q)=%q want=%q", tc.in, got, tc.want)
+		}
+	}
+}
