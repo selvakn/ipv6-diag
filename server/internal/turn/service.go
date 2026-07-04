@@ -81,7 +81,7 @@ func (s *Service) Start() error {
 			packetConfigs = append(packetConfigs, pionturn.PacketConnConfig{
 				PacketConn: pc,
 				RelayAddressGenerator: &pionturn.RelayAddressGeneratorNone{
-					Address: relayAddress(s.cfg.UDP6Addr, "::1", s.cfg.PublicIPv6),
+					Address: bracketIPv6(relayAddress(s.cfg.UDP6Addr, "::1", s.cfg.PublicIPv6)),
 				},
 			})
 			closers = append(closers, func() { _ = pc.Close() })
@@ -111,7 +111,7 @@ func (s *Service) Start() error {
 			listenerConfigs = append(listenerConfigs, pionturn.ListenerConfig{
 				Listener: ln,
 				RelayAddressGenerator: &pionturn.RelayAddressGeneratorNone{
-					Address: relayAddress(s.cfg.TCP6Addr, "::1", s.cfg.PublicIPv6),
+					Address: bracketIPv6(relayAddress(s.cfg.TCP6Addr, "::1", s.cfg.PublicIPv6)),
 				},
 			})
 			closers = append(closers, func() { _ = ln.Close() })
@@ -335,6 +335,18 @@ func firstNonLoopbackIP(v6 bool) string {
 		return lanIP
 	}
 	return anyIP
+}
+
+// bracketIPv6 wraps a bare IPv6 address in square brackets so it can be
+// concatenated with ":port" to form a valid host:port string.
+// pion/turn's RelayAddressGeneratorNone does exactly that in AllocatePacketConn,
+// so without brackets a bare IPv6 address like "2001:db8::1" becomes the invalid
+// string "2001:db8::1:0" causing ListenPacket to fail with a 508 allocation error.
+func bracketIPv6(addr string) string {
+	if ip := net.ParseIP(addr); ip != nil && ip.To4() == nil {
+		return "[" + addr + "]"
+	}
+	return addr
 }
 
 func relayAddress(addr, fallback, public string) string {
