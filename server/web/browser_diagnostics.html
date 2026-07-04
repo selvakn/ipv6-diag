@@ -62,6 +62,12 @@
       <input id="timeout" type="number" min="1000" step="1000" />
     </div>
     <div class="row">
+      <label>IP mode</label>
+      <label><input type="radio" name="ip-mode" value="auto" checked> Auto</label>
+      <label><input type="radio" name="ip-mode" value="ipv4"> IPv4 only</label>
+      <label><input type="radio" name="ip-mode" value="ipv6"> IPv6 only</label>
+    </div>
+    <div class="row">
       <label>Tests</label>
       <label><input type="checkbox" id="sel-http" checked> HTTP</label>
       <label><input type="checkbox" id="sel-https" checked> HTTPS</label>
@@ -271,10 +277,12 @@ function sanitizeTurnUris(rawUris) {
 
 // runTurnTransfer tests a TURN relay server by creating two RTCPeerConnections
 // (relay-only) and measuring data transfer between them.
-// credentialsUrl: full URL of the /turn/credentials endpoint (default: "/turn/credentials").
-// overrideCreds: optional { uris, username, password } — if uris are present the fetch is
-//   skipped entirely; if only username/password are present they replace fetched values.
-async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds) {
+// credentialsUrl:  full URL of the /turn/credentials endpoint (default: "/turn/credentials").
+// overrideCreds:   optional { uris, username, password } — if uris are present the fetch is
+//                  skipped entirely; if only username/password are present they replace fetched values.
+// uriHostOverride: if set, every URI hostname in the final credential set is replaced with this host,
+//                  forcing the TURN connection over the intended IP stack.
+async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds, uriHostOverride) {
   credentialsUrl = credentialsUrl || "/turn/credentials";
   if (!window.RTCPeerConnection) {
     return { status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "WebRTC unavailable in browser" };
@@ -319,6 +327,9 @@ async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds) {
     };
   }
 
+  if (uriHostOverride) {
+    creds.uris = (creds.uris || []).map(u => swapHost(u, uriHostOverride));
+  }
   const turnUris = sanitizeTurnUris(creds.uris);
   if (!turnUris.length) {
     return {
@@ -529,6 +540,21 @@ async function runStunCheck(targetUrl, timeoutMs) {
   });
 }
 
+function getActiveMode() {
+  const el = document.querySelector('input[name="ip-mode"]:checked');
+  return el ? el.value : "auto";
+}
+
+// Swap the hostname inside a URL (http/https) or STUN/TURN URI.
+function swapHost(target, newHost) {
+  if (!newHost || !target) return target;
+  if (/^https?:\/\//i.test(target)) {
+    try { const u = new URL(target); u.hostname = newHost; return u.toString(); } catch(_) {}
+  }
+  // stun: / turn: / turns: / stuns: URIs  →  scheme:HOST:port?params
+  return target.replace(/^((?:s?turns?|stun):)([^:?/]+)(.*)$/, (_, scheme, _h, rest) => scheme + newHost + rest);
+}
+
 // Parse "hostname", "hostname:port", or "scheme://hostname[:port]" into
 // per-test target URLs. All five test types are derived from the hostname;
 // STUN/TURN always use port 3478 independently of the HTTP port.
@@ -569,6 +595,13 @@ function updateCustomServerHint() {
     `HTTP: ${cs.http}  |  HTTPS: ${cs.https}  |  STUN: ${cs.stun}  |  TURN credentials: ${cs.credsUrl}`;
 }
 
+function modeHost() {
+  const mode = getActiveMode();
+  if (mode === "ipv4") return config._v4Host || null;
+  if (mode === "ipv6") return config._v6Host || null;
+  return null;
+}
+
 function resolveTarget(testType) {
   const cs = parseCustomServer(document.getElementById("custom-server").value);
   if (cs) {
@@ -578,8 +611,9 @@ function resolveTarget(testType) {
     if (testType === "STUN")       return { value: cs.stun,  origin: "custom" };
     if (testType === "TURN")       return { value: cs.host,  origin: "custom" };
   }
+  const mh = modeHost();
   const exact = (config.default_targets || []).find((t) => t.test_type === testType);
-  if (exact) return { value: exact.value, origin: "default" };
+  if (exact) return { value: mh ? swapHost(exact.value, mh) : exact.value, origin: mh ? getActiveMode() : "default" };
   return { value: "", origin: "default" };
 }
 
@@ -591,7 +625,10 @@ async function runOne(testType, timeoutMs) {
   if (testType === "STUN") return { ...base, ...(await runStunCheck(target.value, timeoutMs)) };
   if (testType === "TURN") {
     const cs = parseCustomServer(document.getElementById("custom-server").value);
-    const credsUrl = cs ? cs.credsUrl : "/turn/credentials";
+    const mh = cs ? null : modeHost(); // don't apply mode when custom server is set
+    const credsUrl = cs ? cs.credsUrl
+      : mh ? `https://${mh}/turn/credentials`
+      : "/turn/credentials";
     const user = document.getElementById("custom-turn-user").value.trim();
     const pass = document.getElementById("custom-turn-pass").value.trim();
     let overrideCreds = null;
@@ -600,7 +637,7 @@ async function runOne(testType, timeoutMs) {
         ? { uris: [`turn:${cs.host}:3478?transport=udp`, `turn:${cs.host}:3478?transport=tcp`], username: user, password: pass }
         : { username: user, password: pass };
     }
-    return { ...base, ...(await runTurnTransfer(credsUrl, timeoutMs, overrideCreds)) };
+    return { ...base, ...(await runTurnTransfer(credsUrl, timeoutMs, overrideCreds, mh)) };
   }
   return { ...base, status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "Unknown test type" };
 }
@@ -699,6 +736,8 @@ async function loadConfig() {
     `Public access: ${config.public_access ? "enabled" : "disabled"} | Rate limiting: ${config.rate_limiting_enabled ? "enabled" : "disabled"}`;
   document.getElementById("turn-profile-summary").textContent =
     `TURN profile: ${config.turn_payload_size_bytes || 16000} bytes @ ${config.turn_messages_per_second || 20} msg/s for ${config.turn_transfer_window_seconds || 10}s · quality threshold ${(100 * (config.turn_quality_threshold_ratio || 0.9)).toFixed(0)}%`;
+  try { config._v4Host = new URL(config.ip_detect_v4_url).hostname; } catch(_) {}
+  try { config._v6Host = new URL(config.ip_detect_v6_url).hostname; } catch(_) {}
   detectIPs(config.ip_detect_v4_url, config.ip_detect_v6_url);
 }
 
