@@ -28,6 +28,8 @@ func main() {
 		flagTests         = flag.String("tests", "http,https,icmp,stun,turn", "Comma-separated test subset")
 		flagTimeout       = flag.Int("timeout", 15000, "Per-test timeout in milliseconds")
 		flagTurnToken     = flag.String("turn-token", "", "Bearer token for /turn/credentials (or TURN_TOKEN env var)")
+		flagTurnMPS       = flag.Int("turn-mps", 0, "Override TURN messages per second (0 = use server default)")
+		flagTurnPayload   = flag.Int("turn-payload", 0, "Override TURN payload size in bytes (0 = use server default)")
 		flagUpload        = flag.Bool("upload", false, "POST results to /api/reports after run")
 		flagInsecure      = flag.Bool("insecure", false, "Skip TLS certificate verification")
 		flagInsecureUpload = flag.Bool("insecure-upload", false, "Allow --upload when --insecure is active")
@@ -79,6 +81,8 @@ func main() {
 		Tests:          tests,
 		TimeoutMs:      *flagTimeout,
 		TurnToken:      turnToken,
+		TurnMPS:        *flagTurnMPS,
+		TurnPayload:    *flagTurnPayload,
 		Upload:         *flagUpload,
 		Insecure:       *flagInsecure,
 		InsecureUpload: *flagInsecureUpload,

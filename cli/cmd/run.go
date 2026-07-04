@@ -48,7 +48,14 @@ func RunStack(cfg diag.Config, serverCfg *diag.ServerConfig, creds *diag.TurnCre
 		case diag.TestSTUN:
 			r = diag.RunSTUN(target, stack, timeout)
 		case diag.TestTURN:
-			r = diag.RunTURN(serverCfg, creds, stack, timeout, spinner)
+			turnCfg := *serverCfg // shallow copy so we don't mutate the shared config
+			if cfg.TurnMPS > 0 {
+				turnCfg.TurnMessagesPerSec = cfg.TurnMPS
+			}
+			if cfg.TurnPayload > 0 {
+				turnCfg.TurnPayloadBytes = cfg.TurnPayload
+			}
+			r = diag.RunTURN(&turnCfg, creds, stack, timeout, spinner)
 		default:
 			r = diag.TestResult{
 				TestType: tt, AddressFamily: diag.AddressFamily(stack),

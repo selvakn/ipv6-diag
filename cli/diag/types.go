@@ -35,6 +35,8 @@ type Config struct {
 	Tests          []TestType
 	TimeoutMs      int
 	TurnToken      string
+	TurnMPS        int // 0 = use server default
+	TurnPayload    int // bytes, 0 = use server default
 	Upload         bool
 	Insecure       bool
 	InsecureUpload bool
