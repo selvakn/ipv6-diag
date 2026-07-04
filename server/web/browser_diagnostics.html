@@ -70,13 +70,10 @@
       <label><input type="checkbox" id="sel-turn" checked> TURN</label>
     </div>
     <div class="row">
-      <label>Default target</label>
-      <select id="default-targets"></select>
+      <label>Custom server</label>
+      <input id="custom-server" placeholder="hostname or hostname:port  (e.g. 192.168.15.10:6080)" style="min-width:320px">
     </div>
-    <div class="row">
-      <label>Custom target</label>
-      <input id="custom-target" placeholder="optional URL or stun/turn URI">
-    </div>
+    <div class="hint" id="custom-server-hint" style="margin-bottom:6px;padding-left:4px"></div>
     <div class="row">
       <button id="run-btn">Run Selected Tests</button>
       <button id="clear-history-btn" class="secondary">Clear Session History</button>
@@ -261,11 +258,12 @@ function sanitizeTurnUris(rawUris) {
   return [...new Set(out)];
 }
 
-// runTurnTransfer tests the embedded TURN relay server by creating two
-// RTCPeerConnections (relay-only) and measuring data transfer between them.
-// The TURN server URI and credentials are always fetched from /turn/credentials,
-// which reflects the currently running server instance.
-async function runTurnTransfer(_targetUrl, timeoutMs) {
+// runTurnTransfer tests a TURN relay server by creating two RTCPeerConnections
+// (relay-only) and measuring data transfer between them.
+// credentialsUrl is the full URL of the /turn/credentials endpoint to use;
+// defaults to "/turn/credentials" on the current server.
+async function runTurnTransfer(credentialsUrl, timeoutMs) {
+  credentialsUrl = credentialsUrl || "/turn/credentials";
   if (!window.RTCPeerConnection) {
     return { status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "WebRTC unavailable in browser" };
   }
@@ -275,7 +273,7 @@ async function runTurnTransfer(_targetUrl, timeoutMs) {
   // The credential response includes the actual TURN server addresses to use.
   let creds;
   try {
-    const resp = await fetch("/turn/credentials");
+    const resp = await fetch(credentialsUrl);
     if (!resp.ok) {
       return {
         status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
@@ -513,12 +511,58 @@ async function runStunCheck(targetUrl, timeoutMs) {
   });
 }
 
+// Parse "hostname", "hostname:port", or "scheme://hostname[:port]" into
+// per-test target URLs. All five test types are derived from the hostname;
+// STUN/TURN always use port 3478 independently of the HTTP port.
+function parseCustomServer(raw) {
+  raw = (raw || "").trim();
+  if (!raw) return null;
+  let scheme = "https", host = raw, port = "";
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const u = new URL(raw);
+      scheme = u.protocol.slice(0, -1);
+      host = u.hostname;
+      port = u.port;
+    } catch (_) { return null; }
+  } else {
+    const clean = raw.split("/")[0];
+    const m = clean.match(/^(.+):(\d+)$/);
+    if (m) { host = m[1]; port = m[2]; }
+    else { host = clean; }
+    scheme = (port && port !== "443") ? "http" : "https";
+  }
+  const portSuffix = port ? `:${port}` : "";
+  const baseUrl = `${scheme}://${host}${portSuffix}`;
+  return {
+    host, port, scheme, baseUrl,
+    http:     `http://${host}${portSuffix}/diag`,
+    https:    `https://${host}${portSuffix}/diag`,
+    stun:     `stun:${host}:3478`,
+    credsUrl: `${baseUrl}/turn/credentials`,
+  };
+}
+
+function updateCustomServerHint() {
+  const cs = parseCustomServer(document.getElementById("custom-server").value);
+  const hint = document.getElementById("custom-server-hint");
+  if (!cs) { hint.textContent = ""; return; }
+  hint.textContent =
+    `HTTP: ${cs.http}  |  HTTPS: ${cs.https}  |  STUN: ${cs.stun}  |  TURN credentials: ${cs.credsUrl}`;
+}
+
 function resolveTarget(testType) {
-  const custom = document.getElementById("custom-target").value.trim();
-  if (custom && config.allow_custom_targets) return { value: custom, origin: "custom" };
+  const cs = parseCustomServer(document.getElementById("custom-server").value);
+  if (cs) {
+    if (testType === "HTTP")       return { value: cs.http,  origin: "custom" };
+    if (testType === "HTTPS")      return { value: cs.https, origin: "custom" };
+    if (testType === "ICMP_EQUIV") return { value: cs.https, origin: "custom" };
+    if (testType === "STUN")       return { value: cs.stun,  origin: "custom" };
+    if (testType === "TURN")       return { value: cs.host,  origin: "custom" };
+  }
   const exact = (config.default_targets || []).find((t) => t.test_type === testType);
   if (exact) return { value: exact.value, origin: "default" };
-  return { value: document.getElementById("default-targets").value, origin: "default" };
+  return { value: "", origin: "default" };
 }
 
 async function runOne(testType, timeoutMs) {
@@ -527,7 +571,11 @@ async function runOne(testType, timeoutMs) {
   if (!target.value) return { ...base, status: "failed", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "No target configured" };
   if (testType === "HTTP" || testType === "HTTPS" || testType === "ICMP_EQUIV") return { ...base, ...(await runHttpLike(target.value, timeoutMs)) };
   if (testType === "STUN") return { ...base, ...(await runStunCheck(target.value, timeoutMs)) };
-  if (testType === "TURN") return { ...base, ...(await runTurnTransfer(target.value, timeoutMs)) };
+  if (testType === "TURN") {
+    const cs = parseCustomServer(document.getElementById("custom-server").value);
+    const credsUrl = cs ? cs.credsUrl : "/turn/credentials";
+    return { ...base, ...(await runTurnTransfer(credsUrl, timeoutMs)) };
+  }
   return { ...base, status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "Unknown test type" };
 }
 
@@ -622,16 +670,13 @@ async function loadConfig() {
   config = await resp.json();
   document.getElementById("timeout").value = config.per_test_timeout_ms || 15000;
   document.getElementById("config-summary").textContent =
-    `Public access: ${config.public_access ? "enabled" : "disabled"} | Custom targets: ${config.allow_custom_targets ? "enabled" : "disabled"} | Rate limiting: ${config.rate_limiting_enabled ? "enabled" : "disabled"}`;
+    `Public access: ${config.public_access ? "enabled" : "disabled"} | Rate limiting: ${config.rate_limiting_enabled ? "enabled" : "disabled"}`;
   document.getElementById("turn-profile-summary").textContent =
     `TURN profile: ${config.turn_payload_size_bytes || 1024} bytes @ ${config.turn_messages_per_second || 20} msg/s for ${config.turn_transfer_window_seconds || 10}s · quality threshold ${(100 * (config.turn_quality_threshold_ratio || 0.9)).toFixed(0)}%`;
-  const select = document.getElementById("default-targets");
-  select.innerHTML = (config.default_targets || []).map((t) =>
-    `<option value="${escapeHtml(t.value)}">${escapeHtml(t.test_type)} - ${escapeHtml(t.label)} (${escapeHtml(t.value)})</option>`
-  ).join("");
   detectIPs(config.ip_detect_v4_url, config.ip_detect_v6_url);
 }
 
+document.getElementById("custom-server").addEventListener("input", updateCustomServerHint);
 document.getElementById("run-btn").addEventListener("click", runSelectedTests);
 document.getElementById("clear-history-btn").addEventListener("click", () => {
   runHistory = [];
