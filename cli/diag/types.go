@@ -1,6 +1,9 @@
 package diag
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Protocol controls which IP stack tests run on.
 type Protocol string
@@ -68,12 +71,12 @@ type target struct {
 
 // TargetFor returns the configured target URL/URI for a given test type.
 func (sc *ServerConfig) TargetFor(tt TestType) string {
-	want := string(tt)
+	want := strings.ToUpper(string(tt))
 	if tt == TestICMP {
 		want = "ICMP_EQUIV"
 	}
 	for _, t := range sc.DefaultTargets {
-		if t.TestType == want {
+		if strings.ToUpper(t.TestType) == want {
 			return t.Value
 		}
 	}
