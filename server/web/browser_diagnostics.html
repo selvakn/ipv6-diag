@@ -69,11 +69,22 @@
       <label><input type="checkbox" id="sel-stun" checked> STUN</label>
       <label><input type="checkbox" id="sel-turn" checked> TURN</label>
     </div>
-    <div class="row">
-      <label>Custom server</label>
-      <input id="custom-server" placeholder="hostname or hostname:port  (e.g. 192.168.15.10:6080)" style="min-width:320px">
-    </div>
-    <div class="hint" id="custom-server-hint" style="margin-bottom:6px;padding-left:4px"></div>
+    <details id="custom-target-group" style="margin-bottom:10px;border:1px solid #e5e9ef;border-radius:6px;padding:10px 14px;">
+      <summary style="cursor:pointer;font-weight:600;font-size:0.9rem;color:#374151;user-select:none;">Custom target <span class="hint" style="font-weight:400">(override server &amp; TURN credentials)</span></summary>
+      <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
+        <div class="row" style="margin-bottom:0">
+          <label>Server</label>
+          <input id="custom-server" placeholder="hostname or hostname:port  (e.g. 192.168.15.10:6080)" style="min-width:320px">
+        </div>
+        <div class="hint" id="custom-server-hint" style="padding-left:4px"></div>
+        <div class="row" style="margin-bottom:0">
+          <label>TURN credentials</label>
+          <input id="custom-turn-user" placeholder="username" style="width:160px">
+          <input id="custom-turn-pass" type="password" placeholder="password" style="width:160px">
+          <span class="hint">If set, skips credential fetch from server</span>
+        </div>
+      </div>
+    </details>
     <div class="row">
       <button id="run-btn">Run Selected Tests</button>
       <button id="clear-history-btn" class="secondary">Clear Session History</button>
@@ -260,32 +271,39 @@ function sanitizeTurnUris(rawUris) {
 
 // runTurnTransfer tests a TURN relay server by creating two RTCPeerConnections
 // (relay-only) and measuring data transfer between them.
-// credentialsUrl is the full URL of the /turn/credentials endpoint to use;
-// defaults to "/turn/credentials" on the current server.
-async function runTurnTransfer(credentialsUrl, timeoutMs) {
+// credentialsUrl: full URL of the /turn/credentials endpoint (default: "/turn/credentials").
+// overrideCreds: optional { uris, username, password } — if uris are present the fetch is
+//   skipped entirely; if only username/password are present they replace fetched values.
+async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds) {
   credentialsUrl = credentialsUrl || "/turn/credentials";
   if (!window.RTCPeerConnection) {
     return { status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "WebRTC unavailable in browser" };
   }
   const startedAt = nowIso();
 
-  // Fetch credentials and TURN URIs from the embedded server's credential endpoint.
-  // The credential response includes the actual TURN server addresses to use.
   let creds;
-  try {
-    const resp = await fetch(credentialsUrl);
-    if (!resp.ok) {
+  if (overrideCreds?.uris?.length) {
+    // Full override: URIs + credentials supplied, skip HTTP fetch entirely.
+    creds = overrideCreds;
+  } else {
+    try {
+      const resp = await fetch(credentialsUrl);
+      if (!resp.ok) {
+        return {
+          status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
+          reason: "TURN credential fetch failed (HTTP " + resp.status + ")"
+        };
+      }
+      creds = await resp.json();
+    } catch (err) {
       return {
         status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
-        reason: "TURN credential fetch failed (HTTP " + resp.status + ")"
+        reason: "TURN credential fetch error: " + String(err?.message || err)
       };
     }
-    creds = await resp.json();
-  } catch (err) {
-    return {
-      status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
-      reason: "TURN credential fetch error: " + String(err?.message || err)
-    };
+    // Partial override: keep server URIs but use provided username/password.
+    if (overrideCreds?.username) creds.username = overrideCreds.username;
+    if (overrideCreds?.password) creds.password = overrideCreds.password;
   }
 
   if (!(creds?.username && creds?.password)) {
@@ -376,7 +394,7 @@ async function runTurnTransfer(credentialsUrl, timeoutMs) {
   let pingCounter = 0;
   const pendingPings = new Map();
 
-  const dataPayload = buildPayload(config.turn_payload_size_bytes || 1024, 0x01);
+  const dataPayload = buildPayload(config.turn_payload_size_bytes || 16000, 0x01);
   const bDataHandler = (event) => {
     if (event.data instanceof ArrayBuffer) {
       const data = new Uint8Array(event.data);
@@ -472,7 +490,7 @@ async function runTurnTransfer(credentialsUrl, timeoutMs) {
     deliveryQualityRatio: quality,
     qualityThresholdRatio: threshold,
     transferWindowSeconds: windowSec,
-    payloadProfile: `${config.turn_payload_size_bytes || 1024}B@${mps}Hz`,
+    payloadProfile: `${config.turn_payload_size_bytes || 16000}B@${mps}Hz`,
     reason,
     evidence: passed ? `Two clients exchanged data for ${windowSec}s` + modeNote : ""
   };
@@ -574,7 +592,15 @@ async function runOne(testType, timeoutMs) {
   if (testType === "TURN") {
     const cs = parseCustomServer(document.getElementById("custom-server").value);
     const credsUrl = cs ? cs.credsUrl : "/turn/credentials";
-    return { ...base, ...(await runTurnTransfer(credsUrl, timeoutMs)) };
+    const user = document.getElementById("custom-turn-user").value.trim();
+    const pass = document.getElementById("custom-turn-pass").value.trim();
+    let overrideCreds = null;
+    if (user && pass) {
+      overrideCreds = cs
+        ? { uris: [`turn:${cs.host}:3478?transport=udp`, `turn:${cs.host}:3478?transport=tcp`], username: user, password: pass }
+        : { username: user, password: pass };
+    }
+    return { ...base, ...(await runTurnTransfer(credsUrl, timeoutMs, overrideCreds)) };
   }
   return { ...base, status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "Unknown test type" };
 }
@@ -672,7 +698,7 @@ async function loadConfig() {
   document.getElementById("config-summary").textContent =
     `Public access: ${config.public_access ? "enabled" : "disabled"} | Rate limiting: ${config.rate_limiting_enabled ? "enabled" : "disabled"}`;
   document.getElementById("turn-profile-summary").textContent =
-    `TURN profile: ${config.turn_payload_size_bytes || 1024} bytes @ ${config.turn_messages_per_second || 20} msg/s for ${config.turn_transfer_window_seconds || 10}s · quality threshold ${(100 * (config.turn_quality_threshold_ratio || 0.9)).toFixed(0)}%`;
+    `TURN profile: ${config.turn_payload_size_bytes || 16000} bytes @ ${config.turn_messages_per_second || 20} msg/s for ${config.turn_transfer_window_seconds || 10}s · quality threshold ${(100 * (config.turn_quality_threshold_ratio || 0.9)).toFixed(0)}%`;
   detectIPs(config.ip_detect_v4_url, config.ip_detect_v6_url);
 }
 
