@@ -1,6 +1,8 @@
 # Go server
 server/bin/
 server/vendor/
+server/server
+server/reports.db
 *.exe
 *.test
 *.out
@@ -14,6 +16,7 @@ android/.idea/
 *.iml
 *.jks
 *.keystore
+.gradle-local/
 
 # Universal
 .DS_Store
@@ -27,3 +30,5 @@ Thumbs.db
 .env.*
 .gradle-home/
 .gocache/
+
+

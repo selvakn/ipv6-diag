@@ -1,0 +1,11 @@
+---
+description: Release policy for ipv6-diag — when to tag and publish
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Release Policy
+
+Do NOT create git tags or trigger releases unless the user explicitly says "release" or "tag".
+
+Commits and pushes to branches are fine. Only the final `git tag vX.Y.Z && git push origin vX.Y.Z` step requires explicit user instruction.
