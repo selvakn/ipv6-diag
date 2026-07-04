@@ -28,7 +28,7 @@ func FetchServerConfig(serverURL string, transport *http.Transport) (*ServerConf
 		cfg.TurnWindowSeconds = 10
 	}
 	if cfg.TurnPayloadBytes <= 0 {
-		cfg.TurnPayloadBytes = 1024
+		cfg.TurnPayloadBytes = 16000
 	}
 	if cfg.TurnMessagesPerSec <= 0 {
 		cfg.TurnMessagesPerSec = 20

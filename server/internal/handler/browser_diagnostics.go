@@ -60,7 +60,7 @@ func (h *BrowserDiagnosticsConfigHandler) ServeHTTP(w http.ResponseWriter, r *ht
 		DefaultTargets:     loadDefaultBrowserTargets(),
 		TurnCredentialMode: resolveTurnCredentialMode(),
 		TurnWindowSeconds:  envInt("BROWSER_DIAG_TURN_WINDOW_SECONDS", 10),
-		TurnPayloadBytes:   envInt("BROWSER_DIAG_TURN_PAYLOAD_BYTES", 1024),
+		TurnPayloadBytes:   envInt("BROWSER_DIAG_TURN_PAYLOAD_BYTES", 16000),
 		TurnMessagesPerSec: envInt("BROWSER_DIAG_TURN_MESSAGES_PER_SEC", 20),
 		TurnQualityMin:     envFloat("BROWSER_DIAG_TURN_QUALITY_THRESHOLD_RATIO", 0.90),
 		IPDetectV4URL:      envOr("BROWSER_DIAG_IP_DETECT_V4_URL", "https://4.ipv6-diag.selvakn.in/my-ip"),
