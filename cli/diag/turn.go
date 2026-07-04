@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/webrtc/v4"
@@ -151,36 +153,40 @@ func RunTURN(cfg *ServerConfig, creds *TurnCredentials, stack string, timeout ti
 
 	payload := buildPayload(payloadBytes, 0x01)
 
-	var sentPackets, receivedPackets int64
-	var bytesSent, bytesReceived int64
-	var rttSum float64
+	// Use atomics for counters shared with OnMessage callbacks (different goroutine).
+	var sentPackets, receivedPackets atomic.Int64
+	var bytesSent, bytesReceived atomic.Int64
+
+	// pendingPings is accessed from both the send loop and A's OnMessage callback.
+	var pingMu sync.Mutex
+	var rttSumMs float64
 	var rttCount int
 	pingCounter := uint32(0)
 	pendingPings := make(map[uint32]time.Time)
 
-	// B echoes ping packets back to A.
+	// B: echo data back to A so traffic flows both ways through the relay;
+	// echo pings back so A can measure RTT. B does not count sent/received —
+	// quality is measured exclusively at A (round-trip delivery ratio).
 	chBfromA.OnMessage(func(msg webrtc.DataChannelMessage) {
-		if len(msg.Data) >= 5 && msg.Data[0] == 0x02 {
-			chBfromA.Send(msg.Data) //nolint:errcheck
-			return
-		}
-		bytesReceived += int64(len(msg.Data))
-		receivedPackets++
+		chBfromA.Send(msg.Data) //nolint:errcheck — echo everything back to A
 	})
 
-	// A receives data from B and pong from its own pings.
+	// A: count echoed data packets (marker 0x01) as received;
+	// handle pong packets (marker 0x02) for RTT without counting them.
 	chAB.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if len(msg.Data) >= 5 && msg.Data[0] == 0x02 {
 			id := uint32(msg.Data[1])<<24 | uint32(msg.Data[2])<<16 | uint32(msg.Data[3])<<8 | uint32(msg.Data[4])
+			pingMu.Lock()
 			if sent, ok := pendingPings[id]; ok {
-				rttSum += float64(time.Since(sent).Milliseconds())
+				rttSumMs += float64(time.Since(sent).Milliseconds())
 				rttCount++
 				delete(pendingPings, id)
 			}
+			pingMu.Unlock()
 			return
 		}
-		bytesReceived += int64(len(msg.Data))
-		receivedPackets++
+		bytesReceived.Add(int64(len(msg.Data)))
+		receivedPackets.Add(1)
 	})
 
 	// Start spinner.
@@ -199,22 +205,23 @@ loop:
 			if time.Now().After(windowDeadline) {
 				break loop
 			}
-			// Send data payload on AB.
+			// Send data payload A→B. B echoes it back. Quality = echoes received / sends.
 			if err := chAB.Send(payload); err != nil {
 				break loop
 			}
-			bytesSent += int64(len(payload))
-			sentPackets++
+			bytesSent.Add(int64(len(payload)))
+			sentPackets.Add(1) // only data sends count toward quality
 
-			// Send ping on AB.
+			// Send ping for RTT measurement — not counted in sentPackets.
 			ping := buildPing(pingCounter)
+			pingMu.Lock()
 			pendingPings[pingCounter] = time.Now()
+			pingMu.Unlock()
 			pingCounter++
 			if err := chAB.Send(ping); err != nil {
 				break loop
 			}
-			bytesSent += int64(len(ping))
-			sentPackets++
+			bytesSent.Add(int64(len(ping)))
 
 		case <-deadline:
 			if spinner != nil {
@@ -234,14 +241,21 @@ loop:
 		elapsedSec = 0.001
 	}
 
-	rateKbps := float64(bytesReceived*8) / elapsedSec / 1000.0
+	sent := sentPackets.Load()
+	received := receivedPackets.Load()
+	rxBytes := bytesReceived.Load()
+
+	rateKbps := float64(rxBytes*8) / elapsedSec / 1000.0
 	quality := float64(0)
-	if sentPackets > 0 {
-		quality = float64(receivedPackets) / float64(sentPackets)
+	if sent > 0 {
+		quality = float64(received) / float64(sent)
 	}
 	var avgRTT *int64
-	if rttCount > 0 {
-		v := int64(rttSum / float64(rttCount))
+	pingMu.Lock()
+	rc, rs := rttCount, rttSumMs
+	pingMu.Unlock()
+	if rc > 0 {
+		v := int64(rs / float64(rc))
 		avgRTT = &v
 	}
 
@@ -253,6 +267,7 @@ loop:
 		reason = "delivery quality below threshold or transfer window incomplete"
 	}
 
+	txBytes := bytesSent.Load()
 	windowSecInt := windowSec
 	payloadProfile := fmt.Sprintf("%dB@%dHz", payloadBytes, mps)
 	return TestResult{
@@ -266,8 +281,8 @@ loop:
 		LatencyMs:             avgRTT,
 		FailureReason:         reason,
 		TransferRateKbps:      &rateKbps,
-		BytesSent:             &bytesSent,
-		BytesReceived:         &bytesReceived,
+		BytesSent:             &txBytes,
+		BytesReceived:         &rxBytes,
 		DeliveryQualityRatio:  &quality,
 		QualityThresholdRatio: &threshold,
 		TransferWindowSeconds: &windowSecInt,
