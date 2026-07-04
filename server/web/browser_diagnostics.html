@@ -513,7 +513,10 @@ async function runStunCheck(targetUrl, timeoutMs) {
   }
   const startedAt = nowIso();
   const pc = new RTCPeerConnection({ iceServers: [{ urls: [targetUrl] }] });
+  const hostAddrs = [];
+  let stunError = null;
   let resolved = false;
+
   return new Promise((resolve) => {
     const done = (result) => {
       if (resolved) return;
@@ -521,22 +524,36 @@ async function runStunCheck(targetUrl, timeoutMs) {
       try { pc.close(); } catch (_) {}
       resolve({ ...result, startedAt, endedAt: nowIso(), durationMs: msSince(startedAt) });
     };
+
     const timer = setTimeout(() => done({ status: "timed_out", reason: "Per-test timeout reached" }), timeoutMs);
+
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
+      if (!event.candidate) {
+        // Null candidate = gathering complete, but no srflx was found.
         clearTimeout(timer);
-        done({ status: "passed", evidence: "ICE candidate gathered" });
+        const errPart = stunError ? ` (${stunError})` : "";
+        const hostPart = hostAddrs.length ? `; local only: ${hostAddrs.slice(0, 3).join(", ")}` : "";
+        done({ status: "failed", reason: `STUN server unreachable — no reflexive candidate${errPart}${hostPart}` });
+        return;
+      }
+      const c = event.candidate;
+      // Collect host addresses for diagnostic info on failure.
+      if (c.type === "host" && c.address) hostAddrs.push(c.address);
+      // Only a server-reflexive (srflx) candidate proves the STUN server was contacted.
+      if (c.type === "srflx") {
+        clearTimeout(timer);
+        done({ status: "passed", roundTripLatencyMs: msSince(startedAt), evidence: `reflexive: ${c.address}` });
       }
     };
-    pc.onicecandidateerror = () => {
-      clearTimeout(timer);
-      done({ status: "failed", reason: "ICE candidate error" });
+
+    pc.onicecandidateerror = (ev) => {
+      stunError = `error ${ev.errorCode}${ev.errorText ? ": " + ev.errorText : ""}`;
     };
+
     pc.createDataChannel("stun");
-    pc.createOffer().then((offer) => pc.setLocalDescription(offer)).catch(() => {
-      clearTimeout(timer);
-      done({ status: "failed", reason: "Failed to start ICE gathering" });
-    });
+    pc.createOffer()
+      .then((offer) => pc.setLocalDescription(offer))
+      .catch(() => { clearTimeout(timer); done({ status: "failed", reason: "Failed to start ICE gathering" }); });
   });
 }
 
