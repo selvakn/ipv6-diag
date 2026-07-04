@@ -1,6 +1,5 @@
 bin/
 *.md
-fly.toml
 Makefile
 .git/
 .gitignore
