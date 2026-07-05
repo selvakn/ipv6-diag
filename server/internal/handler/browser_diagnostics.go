@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -61,7 +62,7 @@ func (h *BrowserDiagnosticsConfigHandler) ServeHTTP(w http.ResponseWriter, r *ht
 		AllowCustomTargets: envBool("BROWSER_DIAG_ALLOW_CUSTOM_TARGETS", true),
 		PerTestTimeoutMS:   envInt("BROWSER_DIAG_PER_TEST_TIMEOUT_MS", 15000),
 		RateLimiting:       false,
-		DefaultTargets:     loadDefaultBrowserTargets(),
+		DefaultTargets:     loadDefaultBrowserTargets(r),
 		TurnCredentialMode: resolveTurnCredentialMode(),
 		TurnWindowSeconds:  envInt("BROWSER_DIAG_TURN_WINDOW_SECONDS", 10),
 		TurnPayloadBytes:   envInt("BROWSER_DIAG_TURN_PAYLOAD_BYTES", 16000),
@@ -91,39 +92,42 @@ func resolveTurnCredentialMode() string {
 	return "token_required"
 }
 
-func loadDefaultBrowserTargets() []browserDiagTarget {
+func loadDefaultBrowserTargets(r *http.Request) []browserDiagTarget {
+	self := selfBase(r) // e.g. "http://192.168.15.10:6080"
+	selfHost := selfHostOnly(r) // e.g. "192.168.15.10" (no port, for STUN/TURN URIs)
+
 	targets := []browserDiagTarget{
 		{
 			TestType:         "HTTP",
 			Label:            "Default HTTP",
-			Value:            envOr("BROWSER_DIAG_HTTP_TARGET", "http://ipv6-diag.selvakn.in/diag"),
+			Value:            envOr("BROWSER_DIAG_HTTP_TARGET", self+"/diag"),
 			Origin:           "default",
 			EnabledByDefault: true,
 		},
 		{
 			TestType:         "HTTPS",
 			Label:            "Default HTTPS",
-			Value:            envOr("BROWSER_DIAG_HTTPS_TARGET", "https://ipv6-diag.selvakn.in/diag"),
+			Value:            envOr("BROWSER_DIAG_HTTPS_TARGET", self+"/diag"),
 			Origin:           "default",
 			EnabledByDefault: true,
 		},
 		{
 			TestType:         "ICMP_EQUIV",
 			Label:            "Default Reachability",
-			Value:            envOr("BROWSER_DIAG_ICMP_TARGET", "https://ipv6-diag.selvakn.in/diag"),
+			Value:            envOr("BROWSER_DIAG_ICMP_TARGET", self+"/diag"),
 			Origin:           "default",
 			EnabledByDefault: true,
 		},
 		{
 			TestType:         "STUN",
 			Label:            "Default STUN",
-			Value:            envOr("BROWSER_DIAG_STUN_TARGET", "stun:ipv6-diag.selvakn.in:3478"),
+			Value:            envOr("BROWSER_DIAG_STUN_TARGET", "stun:"+selfHost+":3478"),
 			Origin:           "default",
 			EnabledByDefault: true,
 		},
 	}
 
-	if turnTarget := strings.TrimSpace(envOr("BROWSER_DIAG_TURN_TARGET", "turn:ipv6-diag.selvakn.in:3478?transport=udp")); turnTarget != "" {
+	if turnTarget := strings.TrimSpace(envOr("BROWSER_DIAG_TURN_TARGET", "turn:"+selfHost+":3478?transport=udp")); turnTarget != "" {
 		targets = append(targets, browserDiagTarget{
 			TestType:         "TURN",
 			Label:            "Default TURN",
@@ -134,6 +138,26 @@ func loadDefaultBrowserTargets() []browserDiagTarget {
 	}
 
 	return targets
+}
+
+// selfBase returns the scheme+host of the current request for building self-referencing URLs.
+// scheme is http unless TLS is active or X-Forwarded-Proto says https.
+func selfBase(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + r.Host
+}
+
+// selfHostOnly returns the bare hostname (no port) from the request Host header.
+// Used for STUN/TURN URIs which carry their own port numbers.
+func selfHostOnly(r *http.Request) string {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		return h
+	}
+	return host
 }
 
 func envBool(name string, fallback bool) bool {
