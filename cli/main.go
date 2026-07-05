@@ -25,7 +25,7 @@ func main() {
 		flagIPv6          = flag.Bool("ipv6", false, "Force IPv6 stack only")
 		flagBoth          = flag.Bool("both", false, "Run both stacks (default)")
 		flagServer        = flag.String("server", "https://ipv6-diag.selvakn.in", "Base URL of the diagnostic server")
-		flagTests         = flag.String("tests", "http,https,icmp,stun,turn", "Comma-separated test subset")
+		flagTests         = flag.String("tests", "http,https,icmp,stun,turn,wireguard", "Comma-separated test subset")
 		flagTimeout       = flag.Int("timeout", 15000, "Per-test timeout in milliseconds")
 		flagTurnToken     = flag.String("turn-token", "", "Bearer token for /turn/credentials (or TURN_TOKEN env var)")
 		flagTurnTransport = flag.String("turn-transport", "auto", "TURN transport: auto, udp, tcp, tls (TURNS/TCP), dtls (TURNS/UDP)")
@@ -167,6 +167,7 @@ func parseTests(s string) ([]diag.TestType, error) {
 	valid := map[string]diag.TestType{
 		"http": diag.TestHTTP, "https": diag.TestHTTPS,
 		"icmp": diag.TestICMP, "stun": diag.TestSTUN, "turn": diag.TestTURN,
+		"wireguard": diag.TestWireGuard,
 	}
 	var out []diag.TestType
 	for _, tok := range strings.Split(s, ",") {
@@ -176,7 +177,7 @@ func parseTests(s string) ([]diag.TestType, error) {
 		}
 		tt, ok := valid[tok]
 		if !ok {
-			return nil, fmt.Errorf("unknown test type %q (valid: http,https,icmp,stun,turn)", tok)
+			return nil, fmt.Errorf("unknown test type %q (valid: http,https,icmp,stun,turn,wireguard)", tok)
 		}
 		out = append(out, tt)
 	}
