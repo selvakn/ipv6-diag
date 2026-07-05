@@ -7,7 +7,7 @@ import (
 )
 
 func TestActiveURIsIPv6First(t *testing.T) {
-	svc := NewService(Config{}, NewCredentialManager("realm", 5*time.Minute))
+	svc := NewService(Config{}, NewCredentialManager("realm", 5*time.Minute), nil)
 	svc.statuses["udp6"] = ListenerStatus{Key: "udp6", State: "active"}
 	svc.statuses["tcp6"] = ListenerStatus{Key: "tcp6", State: "active"}
 	svc.statuses["udp4"] = ListenerStatus{Key: "udp4", State: "active"}
@@ -29,7 +29,7 @@ func TestActiveURIsIPv6First(t *testing.T) {
 }
 
 func TestActiveURIsLoopbackSubstitution(t *testing.T) {
-	svc := NewService(Config{}, NewCredentialManager("realm", 5*time.Minute))
+	svc := NewService(Config{}, NewCredentialManager("realm", 5*time.Minute), nil)
 	svc.statuses["udp4"] = ListenerStatus{Key: "udp4", State: "active"}
 
 	for _, loopback := range []string{"localhost", "127.0.0.1", "::1"} {

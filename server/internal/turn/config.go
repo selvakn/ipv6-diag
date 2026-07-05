@@ -17,6 +17,8 @@ type Config struct {
 	UDP6Addr string
 	TCP4Addr string
 	TCP6Addr string
+	TLS4Addr string // TURNS over TLS (IPv4), default port 5349
+	TLS6Addr string // TURNS over TLS (IPv6), default port 5349
 
 	PublicIPv4 string
 	PublicIPv6 string
@@ -43,6 +45,8 @@ func LoadConfigFromEnv() Config {
 		UDP6Addr:         envString("TURN_UDP6_ADDR", "[::]:3478"),
 		TCP4Addr:         envString("TURN_TCP4_ADDR", "0.0.0.0:3478"),
 		TCP6Addr:         envString("TURN_TCP6_ADDR", "[::]:3478"),
+		TLS4Addr:         envString("TURN_TLS4_ADDR", "0.0.0.0:5349"),
+		TLS6Addr:         envString("TURN_TLS6_ADDR", "[::]:5349"),
 		PublicIPv4:       os.Getenv("TURN_PUBLIC_IPV4"),
 		PublicIPv6:       os.Getenv("TURN_PUBLIC_IPV6"),
 		CredentialTTL:    ttl,
@@ -53,13 +57,15 @@ func LoadConfigFromEnv() Config {
 		cfg.UDP6Addr = ""
 		cfg.TCP4Addr = ""
 		cfg.TCP6Addr = ""
+		cfg.TLS4Addr = ""
+		cfg.TLS6Addr = ""
 	}
 
 	return cfg
 }
 
 func (c Config) HasAnyListener() bool {
-	return c.UDP4Addr != "" || c.UDP6Addr != "" || c.TCP4Addr != "" || c.TCP6Addr != ""
+	return c.UDP4Addr != "" || c.UDP6Addr != "" || c.TCP4Addr != "" || c.TCP6Addr != "" || c.TLS4Addr != "" || c.TLS6Addr != ""
 }
 
 func envString(key, fallback string) string {

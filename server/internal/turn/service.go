@@ -1,6 +1,7 @@
 package turn
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -20,16 +21,18 @@ type ListenerStatus struct {
 type Service struct {
 	cfg         Config
 	credentials *CredentialManager
+	tlsCfg      *tls.Config // nil means TURNS listeners are skipped
 
 	mu       sync.Mutex
 	server   *pionturn.Server
 	statuses map[string]ListenerStatus
 }
 
-func NewService(cfg Config, credentials *CredentialManager) *Service {
+func NewService(cfg Config, credentials *CredentialManager, tlsCfg *tls.Config) *Service {
 	return &Service{
 		cfg:         cfg,
 		credentials: credentials,
+		tlsCfg:      tlsCfg,
 		statuses:    map[string]ListenerStatus{},
 	}
 }
@@ -118,6 +121,44 @@ func (s *Service) Start() error {
 			addStatus("tcp6", s.cfg.TCP6Addr, "active", "")
 		}
 	}
+	if s.cfg.TLS4Addr != "" {
+		if s.tlsCfg == nil {
+			addStatus("tls4", s.cfg.TLS4Addr, "degraded", "no TLS config — set HTTPS_HOST or provide --cert/--key")
+		} else {
+			ln, err := tls.Listen("tcp4", s.cfg.TLS4Addr, s.tlsCfg)
+			if err != nil {
+				addStatus("tls4", s.cfg.TLS4Addr, "degraded", err.Error())
+			} else {
+				listenerConfigs = append(listenerConfigs, pionturn.ListenerConfig{
+					Listener: ln,
+					RelayAddressGenerator: &pionturn.RelayAddressGeneratorNone{
+						Address: relayAddress(s.cfg.TLS4Addr, "127.0.0.1", s.cfg.PublicIPv4),
+					},
+				})
+				closers = append(closers, func() { _ = ln.Close() })
+				addStatus("tls4", s.cfg.TLS4Addr, "active", "")
+			}
+		}
+	}
+	if s.cfg.TLS6Addr != "" {
+		if s.tlsCfg == nil {
+			addStatus("tls6", s.cfg.TLS6Addr, "degraded", "no TLS config — set HTTPS_HOST or provide --cert/--key")
+		} else {
+			ln, err := tls.Listen("tcp6", s.cfg.TLS6Addr, s.tlsCfg)
+			if err != nil {
+				addStatus("tls6", s.cfg.TLS6Addr, "degraded", err.Error())
+			} else {
+				listenerConfigs = append(listenerConfigs, pionturn.ListenerConfig{
+					Listener: ln,
+					RelayAddressGenerator: &pionturn.RelayAddressGeneratorNone{
+						Address: bracketIPv6(relayAddress(s.cfg.TLS6Addr, "::1", s.cfg.PublicIPv6)),
+					},
+				})
+				closers = append(closers, func() { _ = ln.Close() })
+				addStatus("tls6", s.cfg.TLS6Addr, "active", "")
+			}
+		}
+	}
 
 	if len(packetConfigs) == 0 && len(listenerConfigs) == 0 {
 		return fmt.Errorf("no turn listeners active")
@@ -189,6 +230,8 @@ func (s *Service) ActiveURIs(host string) []string {
 	hasUDP4 := s.statuses["udp4"].State == "active"
 	hasTCP6 := s.statuses["tcp6"].State == "active"
 	hasTCP4 := s.statuses["tcp4"].State == "active"
+	hasTLS6 := s.statuses["tls6"].State == "active"
+	hasTLS4 := s.statuses["tls4"].State == "active"
 
 	// Browsers block TURN allocation requests to loopback/localhost addresses.
 	// When the HTTP Host header resolves to loopback, substitute the machine's
@@ -207,12 +250,18 @@ func (s *Service) ActiveURIs(host string) []string {
 	}
 
 	var uris []string
-	// IPv6-first preference with IPv4 fallback.
+	// IPv6-first preference with IPv4 fallback; TLS (turns:) listed first within each family.
+	if hasTLS6 {
+		uris = append(uris, fmt.Sprintf("turns:%s?transport=tcp", hostPortForURI(turnHost6, s.cfg.TLS6Addr, true)))
+	}
 	if hasUDP6 {
 		uris = append(uris, fmt.Sprintf("turn:%s?transport=udp", hostForURI(turnHost6, true)))
 	}
 	if hasTCP6 {
 		uris = append(uris, fmt.Sprintf("turn:%s?transport=tcp", hostForURI(turnHost6, true)))
+	}
+	if hasTLS4 {
+		uris = append(uris, fmt.Sprintf("turns:%s?transport=tcp", hostPortForURI(turnHost4, s.cfg.TLS4Addr, false)))
 	}
 	if hasUDP4 {
 		uris = append(uris, fmt.Sprintf("turn:%s?transport=udp", hostForURI(turnHost4, false)))
@@ -221,6 +270,31 @@ func (s *Service) ActiveURIs(host string) []string {
 		uris = append(uris, fmt.Sprintf("turn:%s?transport=tcp", hostForURI(turnHost4, false)))
 	}
 	return uris
+}
+
+// hostPortForURI builds the host[:port] token for a TURN URI by combining the
+// HTTP Host value (which carries the hostname) with the port extracted from the
+// bound listener address (e.g. "0.0.0.0:5349" → 5349). This is necessary for
+// TURNS because the TLS port (typically 5349) differs from the HTTPS port and
+// the ICE client needs the exact port.
+func hostPortForURI(host, bindAddr string, v6 bool) string {
+	_, port, err := net.SplitHostPort(bindAddr)
+	if err != nil || port == "" {
+		return hostForURI(host, v6)
+	}
+	// Strip any existing port from host before appending the TURN port.
+	h, _, splitErr := net.SplitHostPort(host)
+	if splitErr != nil {
+		h = host
+	}
+	if h == "" {
+		if v6 {
+			h = "::1"
+		} else {
+			h = "127.0.0.1"
+		}
+	}
+	return net.JoinHostPort(h, port)
 }
 
 func hostForURI(host string, v6 bool) string {

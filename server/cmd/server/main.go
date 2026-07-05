@@ -20,6 +20,7 @@ import (
 	"github.com/selvakn/ipv6diag-server/internal/listener"
 	"github.com/selvakn/ipv6diag-server/internal/store"
 	turnsvc "github.com/selvakn/ipv6diag-server/internal/turn"
+	"github.com/selvakn/ipv6diag-server/internal/tlsutil"
 )
 
 var version = "dev"
@@ -30,8 +31,15 @@ func main() {
 	http6Addr := flag.String("http6-addr", "[::]:"+httpPort, "IPv6 HTTP listen address")
 	httpsAddr := flag.String("https-addr", "0.0.0.0:443", "IPv4 HTTPS listen address")
 	https6Addr := flag.String("https6-addr", "[::]:443", "IPv6 HTTPS listen address")
-	certFile := flag.String("cert", "", "Path to TLS certificate file (PEM)")
-	keyFile := flag.String("key", "", "Path to TLS private key file (PEM)")
+	certFile := flag.String("cert", "", "Path to TLS certificate file (PEM); for a single domain")
+	keyFile := flag.String("key", "", "Path to TLS private key file (PEM); for a single domain")
+	// --tls-certs accepts one or more cert:key path pairs separated by commas.
+	// Use this when serving multiple domains (e.g. behind Caddy with per-domain
+	// certificates). Example:
+	//   --tls-certs /caddy/ipv6-diag.selvakn.in.crt:/caddy/ipv6-diag.selvakn.in.key,\
+	//               /caddy/4.ipv6-diag.selvakn.in.crt:/caddy/4.ipv6-diag.selvakn.in.key
+	// The right certificate is selected per-handshake via SNI.
+	tlsCerts := flag.String("tls-certs", "", "Comma-separated cert:key path pairs for multi-domain TLS (SNI-based selection)")
 	dbPath := flag.String("db", "./reports.db", "Path to SQLite database file")
 	certmagicDir := flag.String("certmagic-dir", "./certmagic-data", "Directory for CertMagic certificate storage (used when HTTPS_HOST is set)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
@@ -54,9 +62,67 @@ func main() {
 	reportsHandler := &handler.ReportsHandler{Store: reportStore}
 	browserDiagPageHandler := &handler.BrowserDiagnosticsPageHandler{}
 	browserDiagConfigHandler := &handler.BrowserDiagnosticsConfigHandler{}
+
+	// Store the published APK alongside the database on the data volume.
+	apkHandler := &handler.APKHandler{
+		Dir:         filepath.Dir(*dbPath),
+		UploadToken: os.Getenv("APK_UPLOAD_TOKEN"),
+	}
+
+	// Build plain-HTTP mux first so the ACME challenge handler can wrap it.
+	httpMux := http.NewServeMux()
+
+	// Resolve TLS config: CertMagic (HTTPS_HOST) > manual cert/key > none.
+	// This must happen before the TURN service starts so TLS listeners for
+	// TURNS (port 5349) can reuse the same certificate.
+	var tlsCfg *tls.Config
+	var httpHandler http.Handler = httpMux
+
+	if len(httpsHosts) > 0 {
+		certmagic.DefaultACME.Agreed = true
+		certmagic.Default.Storage = &certmagic.FileStorage{Path: *certmagicDir}
+		magic := certmagic.NewDefault()
+
+		// Wrap HTTP handler so the ACME issuer can serve HTTP-01 challenge tokens
+		if am, ok := magic.Issuers[0].(*certmagic.ACMEIssuer); ok {
+			httpHandler = am.HTTPChallengeHandler(httpMux)
+		}
+
+		ctx := context.Background()
+		if err := magic.ManageSync(ctx, httpsHosts); err != nil {
+			log.Fatalf("CertMagic failed to obtain certificates for %v: %v", httpsHosts, err)
+		}
+		tlsCfg = magic.TLSConfig()
+		log.Printf("CertMagic: managing certificates for %v", httpsHosts)
+	} else if *tlsCerts != "" {
+		// Multi-domain mode: one cert/key pair per domain, SNI-based selection.
+		// Certificates renewed by Caddy are picked up on the next handshake.
+		pairs, err := parseCertPairs(*tlsCerts)
+		if err != nil {
+			log.Fatalf("--tls-certs: %v", err)
+		}
+		cfg, err := tlsutil.NewMultiFileConfig(pairs)
+		if err != nil {
+			log.Fatalf("Loading TLS certificates: %v", err)
+		}
+		tlsCfg = cfg
+		log.Printf("TLS: SNI-based selection across %d certificate(s), watching for renewal", len(pairs))
+	} else if *certFile != "" && *keyFile != "" {
+		// Single-domain mode: certificate renewed by an external process (e.g.
+		// Caddy) is picked up automatically on the next TLS handshake.
+		cfg, err := tlsutil.NewFileConfig(*certFile, *keyFile)
+		if err != nil {
+			log.Fatalf("Loading TLS certificate: %v", err)
+		}
+		tlsCfg = cfg
+		log.Printf("TLS: watching certificate file for renewal (%s)", *certFile)
+	}
+
 	turnCfg := turnsvc.LoadConfigFromEnv()
 	turnCredentials := turnsvc.NewCredentialManager(turnCfg.Realm, turnCfg.CredentialTTL)
-	turnService := turnsvc.NewService(turnCfg, turnCredentials)
+	// Pass tlsCfg so the TURN service can open TURNS (TLS) listeners on port 5349.
+	// When tlsCfg is nil the TURNS listeners are skipped with a degraded status.
+	turnService := turnsvc.NewService(turnCfg, turnCredentials, tlsCfg)
 	if err := turnService.Start(); err != nil {
 		log.Fatalf("failed to start TURN service: %v", err)
 	}
@@ -71,14 +137,7 @@ func main() {
 		Service:     turnService,
 	}
 
-	// Store the published APK alongside the database on the data volume.
-	apkHandler := &handler.APKHandler{
-		Dir:         filepath.Dir(*dbPath),
-		UploadToken: os.Getenv("APK_UPLOAD_TOKEN"),
-	}
-
-	// Build application muxes
-	httpMux := http.NewServeMux()
+	// Populate the plain-HTTP mux now that turnHandler is available.
 	httpMux.Handle("/", browserDiagPageHandler)
 	httpMux.Handle("/diag", &handler.DiagHandler{IsTLS: false})
 	httpMux.Handle("/health", &handler.HealthHandler{})
@@ -109,34 +168,6 @@ func main() {
 	tlsMux.Handle("/browser-diagnostics", browserDiagPageHandler)
 	tlsMux.Handle("/browser-diagnostics/config", browserDiagConfigHandler)
 	tlsMux.Handle("/my-ip", &handler.MyIPHandler{})
-
-	// Resolve TLS config: CertMagic (HTTPS_HOST) > manual cert/key > none
-	var tlsCfg *tls.Config
-	var httpHandler http.Handler = httpMux
-
-	if len(httpsHosts) > 0 {
-		certmagic.DefaultACME.Agreed = true
-		certmagic.Default.Storage = &certmagic.FileStorage{Path: *certmagicDir}
-		magic := certmagic.NewDefault()
-
-		// Wrap HTTP handler so the ACME issuer can serve HTTP-01 challenge tokens
-		if am, ok := magic.Issuers[0].(*certmagic.ACMEIssuer); ok {
-			httpHandler = am.HTTPChallengeHandler(httpMux)
-		}
-
-		ctx := context.Background()
-		if err := magic.ManageSync(ctx, httpsHosts); err != nil {
-			log.Fatalf("CertMagic failed to obtain certificates for %v: %v", httpsHosts, err)
-		}
-		tlsCfg = magic.TLSConfig()
-		log.Printf("CertMagic: managing certificates for %v", httpsHosts)
-	} else if *certFile != "" && *keyFile != "" {
-		cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
-		if err != nil {
-			log.Fatalf("Loading TLS certificate: %v", err)
-		}
-		tlsCfg = &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
-	}
 
 	// Create plain HTTP listeners (always)
 	listeners, err := listener.Create(*httpAddr, *http6Addr, *httpsAddr, *https6Addr, "", "")
@@ -218,6 +249,32 @@ func envOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// parseCertPairs parses a comma-separated list of "certfile:keyfile" pairs.
+// Colons inside Windows absolute paths (C:\...) are handled by splitting on
+// the last colon that is preceded by more than one character.
+func parseCertPairs(s string) ([]tlsutil.CertKeyPair, error) {
+	var pairs []tlsutil.CertKeyPair
+	for _, entry := range strings.Split(s, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		// Split on the last colon to handle paths like /a/b.crt:/a/b.key
+		idx := strings.LastIndex(entry, ":")
+		if idx <= 0 {
+			return nil, fmt.Errorf("invalid cert:key pair %q (expected colon separator)", entry)
+		}
+		pairs = append(pairs, tlsutil.CertKeyPair{
+			CertFile: entry[:idx],
+			KeyFile:  entry[idx+1:],
+		})
+	}
+	if len(pairs) == 0 {
+		return nil, fmt.Errorf("no cert:key pairs found in %q", s)
+	}
+	return pairs, nil
 }
 
 // splitHosts splits a comma-separated list of hostnames and returns the

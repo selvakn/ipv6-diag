@@ -41,7 +41,7 @@ func TestTurnCredentialsHandlerNoListeners(t *testing.T) {
 		Realm:         "realm",
 		CredentialTTL: 5 * time.Minute,
 	}
-	service := turnsvc.NewService(cfg, turnsvc.NewCredentialManager("realm", 5*time.Minute))
+	service := turnsvc.NewService(cfg, turnsvc.NewCredentialManager("realm", 5*time.Minute), nil)
 
 	h := &TurnCredentialsHandler{
 		Credentials: turnsvc.NewCredentialManager("realm", 5*time.Minute),
