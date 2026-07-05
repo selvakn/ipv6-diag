@@ -41,7 +41,8 @@ services:
       --http-addr=0.0.0.0:80
       --http6-addr=[::]:80
     ports:
-      - "8080:80"        # IPv4 HTTP from host
+      - "8080:80"          # IPv4 HTTP from host
+      # - "51820:51820/udp"  # WireGuard — uncomment together with WG_ENABLED below
     networks:
       diag:
         ipv4_address: 172.28.0.10

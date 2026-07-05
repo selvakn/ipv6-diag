@@ -1,0 +1,54 @@
+{
+  "name": "IPv6 Diagnostic Tool",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "args": {
+      "CMDLINE_TOOLS_BUILD": "11076708",
+      "ANDROID_NDK_VERSION": "25.2.9519653",
+      "ANDROID_PLATFORM": "35",
+      "ANDROID_BUILD_TOOLS": "35.0.0"
+    }
+  },
+  "remoteUser": "vscode",
+
+  "remoteEnv": {
+    "ANDROID_HOME": "/opt/android-sdk",
+    "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk-amd64",
+    "GOTOOLCHAIN": "local",
+    "GOPATH": "/home/vscode/go",
+    "PATH": "${containerEnv:PATH}:/home/vscode/go/bin:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools"
+  },
+
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+
+  "mounts": [
+    "source=${localEnv:HOME}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,consistency=cached,readonly"
+  ],
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "mathiasfrohlich.kotlin",
+        "redhat.java",
+        "vscjava.vscode-java-pack"
+      ],
+      "settings": {
+        "go.gopath": "/home/vscode/go",
+        "go.goroot": "/usr/local/go",
+        "go.toolsGopath": "/home/vscode/go",
+        "go.env": {
+          "GOTOOLCHAIN": "local"
+        },
+        "java.home": "/usr/lib/jvm/java-21-openjdk-amd64",
+        "terminal.integrated.env.linux": {
+          "ANDROID_HOME": "/opt/android-sdk",
+          "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk-amd64"
+        }
+      }
+    }
+  },
+
+  "features": {}
+}

@@ -1,6 +1,6 @@
 module github.com/selvakn/ipv6diag-wg
 
-go 1.26.4
+go 1.24
 
 require (
 	github.com/google/btree v1.1.2 // indirect

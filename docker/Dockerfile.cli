@@ -1,0 +1,42 @@
+# docker/Dockerfile.cli
+# Builds the ipv6diag CLI binary for Linux/amd64.
+#
+# The build context must be the repo root (both cli/ and wgmodule/ are needed
+# because cli/go.mod has a `replace` directive pointing to ../wgmodule).
+#
+# Usage (from repo root):
+#   DOCKER_BUILDKIT=1 docker build \
+#       --file docker/Dockerfile.cli \
+#       --target cli-export \
+#       --output "type=local,dest=cli" \
+#       .
+#
+# Or via Makefile:
+#   make cli-build
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stage 1: compile ─────────────────────────────────────────────────────────
+FROM golang:1.24-bookworm AS builder
+
+ENV GOTOOLCHAIN=local \
+    CGO_ENABLED=0 \
+    GOOS=linux \
+    GOARCH=amd64
+
+WORKDIR /build
+
+# Copy wgmodule first (replace directive in cli/go.mod)
+COPY wgmodule/ ./wgmodule/
+
+# Download cli deps before copying source (better cache utilisation)
+COPY cli/go.mod cli/go.sum ./cli/
+WORKDIR /build/cli
+RUN go mod download
+
+# Build
+COPY cli/ ./
+RUN go build -ldflags="-s -w" -o /out/ipv6diag .
+
+# ── Stage 2: export (consumed by `docker build --output`) ────────────────────
+FROM scratch AS cli-export
+COPY --from=builder /out/ipv6diag /ipv6diag

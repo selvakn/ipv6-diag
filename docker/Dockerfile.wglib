@@ -1,0 +1,77 @@
+# docker/Dockerfile.wglib
+# Builds wglib.aar from wgmodule/ using gomobile bind.
+#
+# Three-stage design for Docker layer caching:
+#   ndk-base   — Go + JDK + Android cmdline-tools + NDK (rebuilt only on ARG changes)
+#   wglib-build — Go sources + gomobile bind (rebuilt only when wgmodule/ changes)
+#   wglib-export — scratch image containing just /wglib.aar (consumed by --output)
+#
+# Usage (from repo root):
+#   DOCKER_BUILDKIT=1 docker build \
+#       --file docker/Dockerfile.wglib \
+#       --target wglib-export \
+#       --output "type=local,dest=android/app/libs" \
+#       .
+#
+# Or via Makefile:
+#   make wglib-build
+#
+# The NDK download (~3 GB) is cached in a Docker layer and only re-fetched
+# when ANDROID_NDK_VERSION or CMDLINE_TOOLS_BUILD changes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stage 1: NDK + gomobile base (heavy; rarely changes) ─────────────────────
+FROM golang:1.24-bookworm AS ndk-base
+
+ARG CMDLINE_TOOLS_BUILD=11076708
+ARG ANDROID_NDK_VERSION=25.2.9519653
+
+ENV ANDROID_HOME=/opt/android-sdk \
+    GOTOOLCHAIN=local \
+    DEBIAN_FRONTEND=noninteractive
+ENV PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        openjdk-21-jdk wget unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Android command-line tools
+RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
+    && wget -q \
+        "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_BUILD}_latest.zip" \
+        -O /tmp/ct.zip \
+    && unzip -q /tmp/ct.zip -d /tmp/ \
+    && mv /tmp/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest" \
+    && rm /tmp/ct.zip
+
+# Android NDK (r25c = 25.2.9519653 — minimum required by gomobile)
+RUN yes | sdkmanager --licenses > /dev/null 2>&1 || true \
+    && sdkmanager "ndk;${ANDROID_NDK_VERSION}"
+
+# gomobile — install and initialise against the NDK
+RUN go install golang.org/x/mobile/cmd/gomobile@latest \
+    && ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}" gomobile init
+
+# ── Stage 2: build wglib.aar ──────────────────────────────────────────────────
+FROM ndk-base AS wglib-build
+
+ARG ANDROID_NDK_VERSION=25.2.9519653
+
+WORKDIR /src/wgmodule
+
+# Download deps first so they are cached separately from source changes
+COPY wgmodule/go.mod wgmodule/go.sum ./
+RUN go mod download
+
+# Build — rebuild only when wgmodule source files change
+COPY wgmodule/ ./
+RUN ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}" \
+    gomobile bind \
+        -target android \
+        -androidapi 26 \
+        -o /out/wglib.aar \
+        .
+
+# ── Stage 3: export (consumed by `docker build --output`) ─────────────────────
+FROM scratch AS wglib-export
+COPY --from=wglib-build /out/wglib.aar /wglib.aar
