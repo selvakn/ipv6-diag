@@ -75,6 +75,17 @@
       <label><input type="checkbox" id="sel-stun" checked> STUN</label>
       <label><input type="checkbox" id="sel-turn" checked> TURN</label>
     </div>
+    <div class="row">
+      <label>TURN transport</label>
+      <select id="turn-transport">
+        <option value="auto">Auto (server preference)</option>
+        <option value="tls">TLS/TCP (turns: encrypted)</option>
+        <option value="dtls">DTLS/UDP (turns: encrypted)</option>
+        <option value="tcp">TCP (turn: plain)</option>
+        <option value="udp">UDP (turn: plain)</option>
+      </select>
+      <span class="hint" id="turn-transport-hint"></span>
+    </div>
     <details id="custom-target-group" style="margin-bottom:10px;border:1px solid #e5e9ef;border-radius:6px;padding:10px 14px;">
       <summary style="cursor:pointer;font-weight:600;font-size:0.9rem;color:#374151;user-select:none;">Custom target <span class="hint" style="font-weight:400">(override server &amp; TURN credentials)</span></summary>
       <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
@@ -250,26 +261,44 @@ function isLocalhostHost(host) {
   return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
 }
 
-function sanitizeTurnUris(rawUris) {
+// sanitizeTurnUris filters and normalizes TURN URIs by scheme/transport.
+// transport: "auto" = all URIs in server order (let ICE negotiate),
+//            "udp"  = turn:?transport=udp, "tcp" = turn:?transport=tcp,
+//            "tls"  = turns:?transport=tcp, "dtls" = turns:?transport=udp.
+function sanitizeTurnUris(rawUris, transport) {
+  transport = (transport || "auto").toLowerCase();
   const out = [];
   for (const raw of (rawUris || [])) {
     const input = String(raw || "").trim();
-    if (!input.toLowerCase().startsWith("turn:")) continue;
-    const withProto = input.replace(/^turn:/i, "turn://");
+    const lc = input.toLowerCase();
+    let scheme;
+    if (lc.startsWith("turns:")) scheme = "turns";
+    else if (lc.startsWith("turn:")) scheme = "turn";
+    else continue;
+
+    // Normalize to a parseable URL by replacing scheme: → turn(s)://
+    const withProto = input.replace(/^turns?:/i, (m) => m + "//");
     let parsed;
-    try {
-      parsed = new URL(withProto);
-    } catch (_) {
-      continue;
+    try { parsed = new URL(withProto); } catch (_) { continue; }
+
+    // Transport from query string
+    const queryTransport = (parsed.searchParams.get("transport") || "udp").toLowerCase();
+
+    // Apply transport filter
+    if (transport !== "auto") {
+      if (transport === "udp"  && !(scheme === "turn"  && queryTransport === "udp"))  continue;
+      if (transport === "tcp"  && !(scheme === "turn"  && queryTransport === "tcp"))  continue;
+      if (transport === "tls"  && !(scheme === "turns" && queryTransport === "tcp"))  continue;
+      if (transport === "dtls" && !(scheme === "turns" && queryTransport === "udp"))  continue;
     }
+
     let host = parsed.hostname;
-    // Wildcard bind addresses are not routable — map to loopback as last resort.
-    // In production, the server should advertise its LAN/public IP instead.
     if (host === "0.0.0.0") host = "127.0.0.1";
     if (host === "::" || host === "[::]") host = "::1";
-    const port = parsed.port || "3478";
+    const defaultPort = scheme === "turns" ? "5349" : "3478";
+    const port = parsed.port || defaultPort;
     const hostForUri = host.includes(":") ? `[${host.replace(/^\[|\]$/g, "")}]` : host;
-    const rebuilt = `turn:${hostForUri}:${port}${parsed.search || ""}`;
+    const rebuilt = `${scheme}:${hostForUri}:${port}?transport=${queryTransport}`;
     out.push(rebuilt);
   }
   return [...new Set(out)];
@@ -282,7 +311,8 @@ function sanitizeTurnUris(rawUris) {
 //                  skipped entirely; if only username/password are present they replace fetched values.
 // uriHostOverride: if set, every URI hostname in the final credential set is replaced with this host,
 //                  forcing the TURN connection over the intended IP stack.
-async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds, uriHostOverride) {
+// transport:       "auto"|"udp"|"tcp"|"tls"|"dtls" — filters which TURN URIs are used.
+async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds, uriHostOverride, transport) {
   credentialsUrl = credentialsUrl || "/turn/credentials";
   if (!window.RTCPeerConnection) {
     return { status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "WebRTC unavailable in browser" };
@@ -330,11 +360,11 @@ async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds, uriHost
   if (uriHostOverride) {
     creds.uris = (creds.uris || []).map(u => swapHost(u, uriHostOverride));
   }
-  const turnUris = sanitizeTurnUris(creds.uris);
+  const turnUris = sanitizeTurnUris(creds.uris, transport);
   if (!turnUris.length) {
     return {
       status: "failed", startedAt, endedAt: nowIso(), durationMs: msSince(startedAt),
-      reason: "No usable TURN URIs after sanitization (raw: " + creds.uris.join(", ") + ")"
+      reason: "No usable TURN URIs for transport=" + (transport || "auto") + " (raw: " + creds.uris.join(", ") + ")"
     };
   }
 
@@ -648,13 +678,14 @@ async function runOne(testType, timeoutMs) {
       : "/turn/credentials";
     const user = document.getElementById("custom-turn-user").value.trim();
     const pass = document.getElementById("custom-turn-pass").value.trim();
+    const turnTransport = document.getElementById("turn-transport").value || "auto";
     let overrideCreds = null;
     if (user && pass) {
       overrideCreds = cs
-        ? { uris: [`turn:${cs.host}:3478?transport=udp`, `turn:${cs.host}:3478?transport=tcp`], username: user, password: pass }
+        ? { uris: [`turn:${cs.host}:3478?transport=udp`, `turn:${cs.host}:3478?transport=tcp`, `turns:${cs.host}:5349?transport=tcp`, `turns:${cs.host}:5349?transport=udp`], username: user, password: pass }
         : { username: user, password: pass };
     }
-    return { ...base, ...(await runTurnTransfer(credsUrl, timeoutMs, overrideCreds, mh)) };
+    return { ...base, ...(await runTurnTransfer(credsUrl, timeoutMs, overrideCreds, mh, turnTransport)) };
   }
   return { ...base, status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "Unknown test type" };
 }
@@ -759,6 +790,16 @@ async function loadConfig() {
 }
 
 document.getElementById("custom-server").addEventListener("input", updateCustomServerHint);
+document.getElementById("turn-transport").addEventListener("change", function() {
+  const hints = {
+    auto: "Server picks the best transport automatically",
+    tls:  "TURNS over TLS/TCP — encrypted, reliable (port 5349)",
+    dtls: "TURNS over DTLS/UDP — encrypted, low-latency (port 5349)",
+    tcp:  "TURN over plain TCP (port 3478)",
+    udp:  "TURN over plain UDP (port 3478)",
+  };
+  document.getElementById("turn-transport-hint").textContent = hints[this.value] || "";
+});
 document.getElementById("run-btn").addEventListener("click", runSelectedTests);
 document.getElementById("clear-history-btn").addEventListener("click", () => {
   runHistory = [];

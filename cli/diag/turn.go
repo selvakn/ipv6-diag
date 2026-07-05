@@ -15,7 +15,8 @@ import (
 
 // RunTURN performs a full ICE-negotiated TURN transfer test using two in-process
 // PeerConnections, matching the browser client's implementation exactly.
-func RunTURN(cfg *ServerConfig, creds *TurnCredentials, stack string, timeout time.Duration, spinner *output.Spinner) TestResult {
+// transport selects which protocol to use: "", "auto", "udp", "tcp", "tls", "dtls".
+func RunTURN(cfg *ServerConfig, creds *TurnCredentials, stack, transport string, timeout time.Duration, spinner *output.Spinner) TestResult {
 	start := time.Now()
 	af := AddressFamily(stack)
 
@@ -33,10 +34,10 @@ func RunTURN(cfg *ServerConfig, creds *TurnCredentials, stack string, timeout ti
 		return failResult(TestTURN, af, "turn:n/a", start, "TURN credential response has no URIs")
 	}
 
-	turnURIs := sanitizeTURNURIs(creds.URIs, stack)
+	turnURIs := sanitizeTURNURIs(creds.URIs, stack, transport)
 	if len(turnURIs) == 0 {
 		return failResult(TestTURN, af, strings.Join(creds.URIs, " "), start,
-			fmt.Sprintf("no usable TURN URIs for %s after sanitization (raw: %v)", af, creds.URIs))
+			fmt.Sprintf("no usable TURN URIs for %s transport=%s after sanitization (raw: %v)", af, transport, creds.URIs))
 	}
 	target := strings.Join(turnURIs, " ")
 
@@ -309,42 +310,105 @@ func buildPing(counter uint32) []byte {
 	return p
 }
 
-func sanitizeTURNURIs(raw []string, stack string) []string {
+// sanitizeTURNURIs filters and normalizes TURN URIs for the given stack and transport.
+//
+// transport selects which protocol to include:
+//   - "", "auto" — all URIs in server order (let ICE negotiate best)
+//   - "udp"      — turn:?transport=udp  (plain UDP)
+//   - "tcp"      — turn:?transport=tcp  (plain TCP)
+//   - "tls"      — turns:?transport=tcp (TURNS over TLS/TCP)
+//   - "dtls"     — turns:?transport=udp (TURNS over DTLS/UDP)
+func sanitizeTURNURIs(raw []string, stack, transport string) []string {
 	var out []string
 	for _, r := range raw {
 		r = strings.TrimSpace(r)
-		if !strings.HasPrefix(strings.ToLower(r), "turn:") {
+		lower := strings.ToLower(r)
+
+		var scheme string
+		switch {
+		case strings.HasPrefix(lower, "turns:"):
+			scheme = "turns"
+		case strings.HasPrefix(lower, "turn:"):
+			scheme = "turn"
+		default:
 			continue
 		}
-		withProto := strings.Replace(r, "turn:", "turn://", 1)
-		// Extract host from turn://host:port?transport=udp
-		withProto = strings.SplitN(withProto, "?", 2)[0]
-		hostport := strings.TrimPrefix(withProto, "turn://")
+
+		// Parse hostport and query string.
+		rest := r[len(scheme)+1:]
+		var hostport, query string
+		if q := strings.IndexByte(rest, '?'); q >= 0 {
+			hostport, query = rest[:q], rest[q+1:]
+		} else {
+			hostport = rest
+		}
+
+		// Determine transport from query.
+		queryTransport := "udp"
+		for _, part := range strings.Split(query, "&") {
+			kv := strings.SplitN(part, "=", 2)
+			if len(kv) == 2 && strings.EqualFold(kv[0], "transport") {
+				queryTransport = strings.ToLower(kv[1])
+				break
+			}
+		}
+
+		// Apply transport filter.
+		switch strings.ToLower(transport) {
+		case "", "auto":
+			// keep all
+		case "udp":
+			if scheme != "turn" || queryTransport != "udp" {
+				continue
+			}
+		case "tcp":
+			if scheme != "turn" || queryTransport != "tcp" {
+				continue
+			}
+		case "tls":
+			if scheme != "turns" || queryTransport != "tcp" {
+				continue
+			}
+		case "dtls":
+			if scheme != "turns" || queryTransport != "udp" {
+				continue
+			}
+		// unknown transport acts like "auto"
+		}
+
+		// Parse host for IP-family filtering.
 		host, port, err := net.SplitHostPort(hostport)
 		if err != nil {
-			// might be host-only
 			host = hostport
-			port = "3478"
+			if scheme == "turns" {
+				port = "5349"
+			} else {
+				port = "3478"
+			}
 		}
-		// Skip wildcard addresses.
+
+		// Skip wildcard bind addresses.
 		if host == "0.0.0.0" || host == "::" || host == "[::]" {
 			continue
 		}
-		// For IPv6 stack, prefer URIs with IPv6 hosts; skip v4-only for v6 stack if we have v6 options.
+
+		// IP-family filter (only applies to literal IP hosts).
 		hostIP := net.ParseIP(host)
 		if stack == "ipv6" && hostIP != nil && hostIP.To4() != nil {
-			continue // skip literal IPv4 for IPv6 stack
+			continue
 		}
 		if stack == "ipv4" && hostIP != nil && hostIP.To4() == nil {
-			continue // skip literal IPv6 for IPv4 stack
+			continue
 		}
+
+		// Rebuild canonical URI.
 		hostForURI := host
-		if strings.Contains(host, ":") {
+		if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
 			hostForURI = "[" + host + "]"
 		}
-		rebuilt := fmt.Sprintf("turn:%s:%s?transport=udp", hostForURI, port)
-		out = append(out, rebuilt)
+		out = append(out, fmt.Sprintf("%s:%s:%s?transport=%s", scheme, hostForURI, port, queryTransport))
 	}
+
 	// Deduplicate.
 	seen := make(map[string]bool)
 	var deduped []string
@@ -354,15 +418,49 @@ func sanitizeTURNURIs(raw []string, stack string) []string {
 			deduped = append(deduped, u)
 		}
 	}
-	// If no URIs matched the stack's IP family filter (e.g., hostname-based URIs), return all.
+
+	// Hostname fallback: if IP-family filter eliminated everything (URIs use hostnames that
+	// resolve to both families), return URIs without that filter applied.
 	if len(deduped) == 0 && len(raw) > 0 {
-		// Hostnames can resolve to either family; return filtered list without IP-family filtering.
 		for _, r := range raw {
-			if strings.HasPrefix(strings.ToLower(r), "turn:") {
-				deduped = append(deduped, r)
+			r = strings.TrimSpace(r)
+			lower := strings.ToLower(r)
+			var scheme string
+			switch {
+			case strings.HasPrefix(lower, "turns:"):
+				scheme = "turns"
+			case strings.HasPrefix(lower, "turn:"):
+				scheme = "turn"
+			default:
+				continue
 			}
+			queryTransport := "udp"
+			if strings.Contains(lower, "transport=tcp") {
+				queryTransport = "tcp"
+			}
+			switch strings.ToLower(transport) {
+			case "", "auto":
+			case "udp":
+				if scheme != "turn" || queryTransport != "udp" {
+					continue
+				}
+			case "tcp":
+				if scheme != "turn" || queryTransport != "tcp" {
+					continue
+				}
+			case "tls":
+				if scheme != "turns" || queryTransport != "tcp" {
+					continue
+				}
+			case "dtls":
+				if scheme != "turns" || queryTransport != "udp" {
+					continue
+				}
+			}
+			deduped = append(deduped, r)
 		}
 	}
+
 	return deduped
 }
 

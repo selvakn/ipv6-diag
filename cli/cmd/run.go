@@ -55,7 +55,7 @@ func RunStack(cfg diag.Config, serverCfg *diag.ServerConfig, creds *diag.TurnCre
 			if cfg.TurnPayload > 0 {
 				turnCfg.TurnPayloadBytes = cfg.TurnPayload
 			}
-			r = diag.RunTURN(&turnCfg, creds, stack, timeout, spinner)
+			r = diag.RunTURN(&turnCfg, creds, stack, cfg.TurnTransport, timeout, spinner)
 		default:
 			r = diag.TestResult{
 				TestType: tt, AddressFamily: diag.AddressFamily(stack),

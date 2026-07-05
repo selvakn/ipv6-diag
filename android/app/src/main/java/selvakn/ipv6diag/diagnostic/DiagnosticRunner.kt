@@ -1,6 +1,7 @@
 package selvakn.ipv6diag.diagnostic
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -48,7 +49,14 @@ class DiagnosticRunner(
         filter: TestFilter,
     ): DiagnosticSession = coroutineScope {
         val (targetHost, customPort) = parseHostAndPort(endpoint.hostname)
-        val stunTurnPort = customPort ?: 3478
+        val turnTransport = context.getSharedPreferences("ipv6diag_prefs", Context.MODE_PRIVATE)
+            .getString("turn_transport", "udp") ?: "udp"
+        val encryptedPort = if (customPort != null && customPort != 3478) customPort else 5349
+        val plainPort = customPort ?: 3478
+        val stunTurnPort = when (turnTransport) {
+            "tls", "dtls" -> encryptedPort
+            else -> plainPort
+        }
         val transferWindowSeconds = context.resources.getInteger(R.integer.turn_transfer_window_seconds)
         val transferPayloadBytes = context.resources.getInteger(R.integer.turn_transfer_payload_size_bytes)
         val transferMessagesPerSecond = context.resources.getInteger(R.integer.turn_transfer_messages_per_second)
@@ -137,6 +145,7 @@ class DiagnosticRunner(
                                 payloadSizeBytes = transferPayloadBytes,
                                 messagesPerSecond = transferMessagesPerSecond,
                                 qualityThresholdRatio = transferQualityThreshold,
+                                transport = turnTransport,
                             )
                         )
                         if (ipv6Addr != null) add(
@@ -150,6 +159,7 @@ class DiagnosticRunner(
                                 payloadSizeBytes = transferPayloadBytes,
                                 messagesPerSecond = transferMessagesPerSecond,
                                 qualityThresholdRatio = transferQualityThreshold,
+                                transport = turnTransport,
                             )
                         )
                         if (isEmpty()) {

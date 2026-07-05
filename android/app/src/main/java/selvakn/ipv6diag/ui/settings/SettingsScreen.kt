@@ -1,5 +1,6 @@
 package selvakn.ipv6diag.ui.settings
 
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,7 +13,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +46,13 @@ import okhttp3.Request
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
+private val turnTransportOptions = listOf(
+    "udp"  to "UDP / plain (port 3478)",
+    "tcp"  to "TCP / plain (port 3478)",
+    "tls"  to "TLS/TCP — TURNS encrypted (port 5349)",
+    "dtls" to "DTLS/UDP — TURNS encrypted (port 5349)",
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(navController: NavController) {
@@ -50,9 +61,13 @@ fun SettingsScreen(navController: NavController) {
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
 
+    val prefs = context.getSharedPreferences("ipv6diag_prefs", Context.MODE_PRIVATE)
+
     var customHostname by remember { mutableStateOf("") }
     var currentEndpoint by remember { mutableStateOf("") }
     var isVerifying by remember { mutableStateOf(false) }
+    var turnTransport by remember { mutableStateOf(prefs.getString("turn_transport", "udp") ?: "udp") }
+    var transportMenuExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val endpoint = app.sessionRepository.getActiveEndpoint()
@@ -80,6 +95,39 @@ fun SettingsScreen(navController: NavController) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("Current Server: $currentEndpoint", style = MaterialTheme.typography.bodyMedium)
+
+            Spacer(Modifier.height(8.dp))
+            Text("TURN Transport", style = MaterialTheme.typography.labelMedium)
+            val selectedLabel = turnTransportOptions.firstOrNull { it.first == turnTransport }?.second
+                ?: turnTransport
+            ExposedDropdownMenuBox(
+                expanded = transportMenuExpanded,
+                onExpandedChange = { transportMenuExpanded = it },
+            ) {
+                OutlinedTextField(
+                    value = selectedLabel,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Protocol") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = transportMenuExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                )
+                ExposedDropdownMenu(
+                    expanded = transportMenuExpanded,
+                    onDismissRequest = { transportMenuExpanded = false },
+                ) {
+                    turnTransportOptions.forEach { (value, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                turnTransport = value
+                                prefs.edit().putString("turn_transport", value).apply()
+                                transportMenuExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(8.dp))
             Text("Custom Server Hostname", style = MaterialTheme.typography.labelMedium)
