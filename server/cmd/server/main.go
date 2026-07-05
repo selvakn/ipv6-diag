@@ -31,15 +31,16 @@ func main() {
 	http6Addr := flag.String("http6-addr", "[::]:"+httpPort, "IPv6 HTTP listen address")
 	httpsAddr := flag.String("https-addr", "0.0.0.0:443", "IPv4 HTTPS listen address")
 	https6Addr := flag.String("https6-addr", "[::]:443", "IPv6 HTTPS listen address")
-	certFile := flag.String("cert", "", "Path to TLS certificate file (PEM); for a single domain")
-	keyFile := flag.String("key", "", "Path to TLS private key file (PEM); for a single domain")
-	// --tls-certs accepts one or more cert:key path pairs separated by commas.
-	// Use this when serving multiple domains (e.g. behind Caddy with per-domain
-	// certificates). Example:
-	//   --tls-certs /caddy/ipv6-diag.selvakn.in.crt:/caddy/ipv6-diag.selvakn.in.key,\
-	//               /caddy/4.ipv6-diag.selvakn.in.crt:/caddy/4.ipv6-diag.selvakn.in.key
-	// The right certificate is selected per-handshake via SNI.
-	tlsCerts := flag.String("tls-certs", "", "Comma-separated cert:key path pairs for multi-domain TLS (SNI-based selection)")
+	certFile := flag.String("cert", "", "Path to TLS certificate file (PEM); enables both HTTPS and TURNS")
+	keyFile := flag.String("key", "", "Path to TLS private key file (PEM); enables both HTTPS and TURNS")
+	// --tls-certs: multiple cert/key pairs for self-managed HTTPS + TURNS.
+	// Right cert selected per-handshake via SNI. Enables both HTTPS (port 443)
+	// and TURNS (port 5349).
+	tlsCerts := flag.String("tls-certs", "", "Comma-separated cert:key pairs for multi-domain HTTPS+TURNS (SNI selection)")
+	// --turn-tls-certs: like --tls-certs but only activates TURNS (port 5349).
+	// Use this when a reverse proxy (e.g. Caddy) handles HTTPS so the server
+	// must NOT attempt to bind port 443 itself.
+	turnTLSCerts := flag.String("turn-tls-certs", "", "Comma-separated cert:key pairs for TURNS only — does not bind HTTPS port 443")
 	dbPath := flag.String("db", "./reports.db", "Path to SQLite database file")
 	certmagicDir := flag.String("certmagic-dir", "./certmagic-data", "Directory for CertMagic certificate storage (used when HTTPS_HOST is set)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
@@ -72,10 +73,14 @@ func main() {
 	// Build plain-HTTP mux first so the ACME challenge handler can wrap it.
 	httpMux := http.NewServeMux()
 
-	// Resolve TLS config: CertMagic (HTTPS_HOST) > manual cert/key > none.
-	// This must happen before the TURN service starts so TLS listeners for
-	// TURNS (port 5349) can reuse the same certificate.
-	var tlsCfg *tls.Config
+	// tlsCfg drives HTTPS listeners on port 443.
+	// turnTLSCfg drives TURNS listeners on port 5349.
+	// They are the same when the server manages its own TLS (HTTPS_HOST,
+	// --cert/--key, --tls-certs). They differ when a reverse proxy owns HTTPS:
+	// in that case --turn-tls-certs sets only turnTLSCfg, leaving tlsCfg nil
+	// so the server never attempts to bind port 443.
+	var tlsCfg *tls.Config     // for HTTPS
+	var turnTLSCfg *tls.Config // for TURNS
 	var httpHandler http.Handler = httpMux
 
 	if len(httpsHosts) > 0 {
@@ -93,10 +98,10 @@ func main() {
 			log.Fatalf("CertMagic failed to obtain certificates for %v: %v", httpsHosts, err)
 		}
 		tlsCfg = magic.TLSConfig()
+		turnTLSCfg = tlsCfg
 		log.Printf("CertMagic: managing certificates for %v", httpsHosts)
 	} else if *tlsCerts != "" {
-		// Multi-domain mode: one cert/key pair per domain, SNI-based selection.
-		// Certificates renewed by Caddy are picked up on the next handshake.
+		// Self-managed multi-domain: binds both HTTPS (443) and TURNS (5349).
 		pairs, err := parseCertPairs(*tlsCerts)
 		if err != nil {
 			log.Fatalf("--tls-certs: %v", err)
@@ -106,23 +111,39 @@ func main() {
 			log.Fatalf("Loading TLS certificates: %v", err)
 		}
 		tlsCfg = cfg
-		log.Printf("TLS: SNI-based selection across %d certificate(s), watching for renewal", len(pairs))
+		turnTLSCfg = tlsCfg
+		log.Printf("TLS: SNI-based selection across %d certificate(s) for HTTPS+TURNS", len(pairs))
 	} else if *certFile != "" && *keyFile != "" {
-		// Single-domain mode: certificate renewed by an external process (e.g.
-		// Caddy) is picked up automatically on the next TLS handshake.
+		// Self-managed single-domain: binds both HTTPS (443) and TURNS (5349).
 		cfg, err := tlsutil.NewFileConfig(*certFile, *keyFile)
 		if err != nil {
 			log.Fatalf("Loading TLS certificate: %v", err)
 		}
 		tlsCfg = cfg
+		turnTLSCfg = tlsCfg
 		log.Printf("TLS: watching certificate file for renewal (%s)", *certFile)
+	}
+
+	// --turn-tls-certs overrides turnTLSCfg only — for behind-proxy deployments
+	// where Caddy owns HTTPS but TURNS needs its own TLS listeners.
+	if *turnTLSCerts != "" {
+		pairs, err := parseCertPairs(*turnTLSCerts)
+		if err != nil {
+			log.Fatalf("--turn-tls-certs: %v", err)
+		}
+		cfg, err := tlsutil.NewMultiFileConfig(pairs)
+		if err != nil {
+			log.Fatalf("Loading TURNS certificates: %v", err)
+		}
+		turnTLSCfg = cfg
+		log.Printf("TURNS: SNI-based selection across %d certificate(s), watching for renewal", len(pairs))
 	}
 
 	turnCfg := turnsvc.LoadConfigFromEnv()
 	turnCredentials := turnsvc.NewCredentialManager(turnCfg.Realm, turnCfg.CredentialTTL)
-	// Pass tlsCfg so the TURN service can open TURNS (TLS) listeners on port 5349.
-	// When tlsCfg is nil the TURNS listeners are skipped with a degraded status.
-	turnService := turnsvc.NewService(turnCfg, turnCredentials, tlsCfg)
+	// turnTLSCfg is nil when no cert is configured; TURNS listeners are then
+	// skipped with a "degraded" status rather than failing.
+	turnService := turnsvc.NewService(turnCfg, turnCredentials, turnTLSCfg)
 	if err := turnService.Start(); err != nil {
 		log.Fatalf("failed to start TURN service: %v", err)
 	}
