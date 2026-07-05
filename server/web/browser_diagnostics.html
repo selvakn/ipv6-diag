@@ -418,7 +418,7 @@ async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds, uriHost
     const iceErrorText = iceErrors.length ? ` | iceErrors=${iceErrors.join("; ")}` : "";
     return {
       status: "failed",
-      target: turnUris.join(" "),
+      target: turnUris[0],
       startedAt,
       endedAt: nowIso(),
       durationMs: msSince(startedAt),
@@ -520,7 +520,7 @@ async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds, uriHost
   const modeNote = localPage ? " (host-candidate mode; relay blocked on localhost)" : " (relay-only)";
   return {
     status,
-    target: turnUris.join(" "),
+    target: turnUris[0],
     startedAt,
     endedAt: nowIso(),
     durationMs: elapsedMs,
