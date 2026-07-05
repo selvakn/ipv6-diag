@@ -160,8 +160,10 @@ func main() {
 	}
 
 	// WireGuard service (opt-in via WG_ENABLED=true).
+	// The handler is always registered so the route exists; it returns 503 when
+	// the service is disabled, which clients interpret as SKIPPED.
 	wgCfg := wgsvc.LoadConfigFromEnv()
-	var wgHandler *handler.WireGuardCredentialsHandler
+	wgHandler := &handler.WireGuardCredentialsHandler{Token: os.Getenv("TOKEN")}
 	if wgCfg.Enabled {
 		wgService, err := wgsvc.NewService(wgCfg)
 		if err != nil {
@@ -171,11 +173,8 @@ func main() {
 			log.Fatalf("failed to start WireGuard service: %v", err)
 		}
 		defer wgService.Stop()
-		wgHandler = &handler.WireGuardCredentialsHandler{
-			Token:    os.Getenv("TOKEN"),
-			Sessions: wgService.Sessions(),
-			Service:  wgService,
-		}
+		wgHandler.Sessions = wgService.Sessions()
+		wgHandler.Service = wgService
 		log.Printf("WireGuard service enabled on UDP port %d", wgCfg.Port)
 	}
 
@@ -194,9 +193,7 @@ func main() {
 	httpMux.Handle("/browser-diagnostics", browserDiagPageHandler)
 	httpMux.Handle("/browser-diagnostics/config", browserDiagConfigHandler)
 	httpMux.Handle("/my-ip", &handler.MyIPHandler{})
-	if wgHandler != nil {
-		httpMux.Handle("/wireguard/credentials", wgHandler)
-	}
+	httpMux.Handle("/wireguard/credentials", wgHandler)
 
 	tlsMux := http.NewServeMux()
 	tlsMux.Handle("/", browserDiagPageHandler)
@@ -213,9 +210,7 @@ func main() {
 	tlsMux.Handle("/browser-diagnostics", browserDiagPageHandler)
 	tlsMux.Handle("/browser-diagnostics/config", browserDiagConfigHandler)
 	tlsMux.Handle("/my-ip", &handler.MyIPHandler{})
-	if wgHandler != nil {
-		tlsMux.Handle("/wireguard/credentials", wgHandler)
-	}
+	tlsMux.Handle("/wireguard/credentials", wgHandler)
 
 	// Create plain HTTP listeners (always)
 	listeners, err := listener.Create(*httpAddr, *http6Addr, *httpsAddr, *https6Addr, "", "")
