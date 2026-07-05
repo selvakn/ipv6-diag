@@ -18,15 +18,16 @@ const (
 type TestType string
 
 const (
-	TestHTTP  TestType = "http"
-	TestHTTPS TestType = "https"
-	TestICMP  TestType = "icmp"
-	TestSTUN  TestType = "stun"
-	TestTURN  TestType = "turn"
+	TestHTTP      TestType = "http"
+	TestHTTPS     TestType = "https"
+	TestICMP      TestType = "icmp"
+	TestSTUN      TestType = "stun"
+	TestTURN      TestType = "turn"
+	TestWireGuard TestType = "wireguard"
 )
 
 // AllTests is the default test suite in order.
-var AllTests = []TestType{TestHTTP, TestHTTPS, TestICMP, TestSTUN, TestTURN}
+var AllTests = []TestType{TestHTTP, TestHTTPS, TestICMP, TestSTUN, TestTURN, TestWireGuard}
 
 // Config holds all CLI runtime configuration.
 type Config struct {
@@ -55,14 +56,18 @@ type Target struct {
 
 // ServerConfig is fetched from /browser-diagnostics/config.
 type ServerConfig struct {
-	TurnCredentialMode string   `json:"turn_credential_mode"`
-	TurnWindowSeconds  int      `json:"turn_transfer_window_seconds"`
-	TurnPayloadBytes   int      `json:"turn_payload_size_bytes"`
-	TurnMessagesPerSec int      `json:"turn_messages_per_second"`
-	TurnQualityMin     float64  `json:"turn_quality_threshold_ratio"`
-	IPDetectV4URL      string   `json:"ip_detect_v4_url"`
-	IPDetectV6URL      string   `json:"ip_detect_v6_url"`
-	DefaultTargets     []target `json:"default_targets"`
+	TurnCredentialMode   string   `json:"turn_credential_mode"`
+	TurnWindowSeconds    int      `json:"turn_transfer_window_seconds"`
+	TurnPayloadBytes     int      `json:"turn_payload_size_bytes"`
+	TurnMessagesPerSec   int      `json:"turn_messages_per_second"`
+	TurnQualityMin       float64  `json:"turn_quality_threshold_ratio"`
+	IPDetectV4URL        string   `json:"ip_detect_v4_url"`
+	IPDetectV6URL        string   `json:"ip_detect_v6_url"`
+	WireGuardEnabled     bool     `json:"wireguard_enabled"`
+	WireGuardEchoPort    int      `json:"wireguard_echo_port"`
+	WireGuardWindowSec   int      `json:"wireguard_transfer_window_seconds"`
+	WireGuardPayloadBytes int     `json:"wireguard_payload_size_bytes"`
+	DefaultTargets       []target `json:"default_targets"`
 }
 
 type target struct {
@@ -92,6 +97,16 @@ type TurnCredentials struct {
 	Password string   `json:"password"`
 	Realm    string   `json:"realm"`
 	URIs     []string `json:"uris"`
+}
+
+// WireGuardCredentials are fetched from /wireguard/credentials.
+type WireGuardCredentials struct {
+	ClientPrivateKey string `json:"client_private_key"`
+	ClientIP         string `json:"client_ip"`
+	ServerPublicKey  string `json:"server_public_key"`
+	ServerEndpoint   string `json:"server_endpoint"`
+	TTLSeconds       int    `json:"ttl_seconds"`
+	ExpiresAt        string `json:"expires_at"`
 }
 
 // TestStatus represents the outcome of a single test.

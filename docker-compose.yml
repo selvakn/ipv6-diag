@@ -54,6 +54,15 @@ services:
       start_period: 5s
     environment:
       - TZ=UTC
+      # WireGuard service (opt-in). Uncomment and set WG_PUBLIC_ENDPOINT to your
+      # server's public IP:port when running in a network-accessible deployment.
+      # Also expose UDP port 51820 in the ports block below when enabling.
+      # - WG_ENABLED=true
+      # - WG_PORT=51820
+      # - WG_SUBNET=10.0.0.0/24
+      # - WG_MAX_SESSIONS=50
+      # - WG_SESSION_TTL=2m
+      # - WG_PUBLIC_ENDPOINT=<your-server-ip>:51820
 
   # ── Server test runner ───────────────────────────────────────────────────────
   # Runs curl-based tests against the server (IPv4 + IPv6 /diag and /health).

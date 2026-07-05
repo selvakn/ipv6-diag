@@ -91,7 +91,7 @@ class DiagnosticRunner(
             val runXlat = filter == TestFilter.XLAT_464 ||
                 (filter == TestFilter.ALL && (networkInfo.clatPresent || networkInfo.hasNativeIPv6))
             val baseTypes = when (filter) {
-                TestFilter.ALL -> listOf(TestType.HTTP, TestType.HTTPS, TestType.ICMP, TestType.DNS, TestType.STUN, TestType.TURN)
+                TestFilter.ALL -> listOf(TestType.HTTP, TestType.HTTPS, TestType.ICMP, TestType.DNS, TestType.STUN, TestType.TURN, TestType.WIREGUARD)
                 TestFilter.HTTP_HTTPS -> listOf(TestType.HTTP, TestType.HTTPS)
                 TestFilter.ICMP -> listOf(TestType.ICMP)
                 TestFilter.DNS -> listOf(TestType.DNS)
@@ -173,6 +173,26 @@ class DiagnosticRunner(
                                     failureReason = "server unsupported",
                                 )
                             )
+                        }
+                    }
+                    TestType.WIREGUARD -> buildList {
+                        val serverURL = "https://${targetHost}:${endpoint.httpsPort}"
+                        val token = "" // TODO: expose token from endpoint config
+                        if (ipv4Addr != null) add(
+                            runWireGuardTest(network, sessionId, serverURL, token, AddressFamily.IPv4)
+                        )
+                        if (ipv6Addr != null) add(
+                            runWireGuardTest(network, sessionId, serverURL, token, AddressFamily.IPv6)
+                        )
+                        if (isEmpty()) {
+                            add(TestResult(
+                                id = java.util.UUID.randomUUID().toString(),
+                                sessionId = sessionId,
+                                testType = TestType.WIREGUARD,
+                                addressFamily = AddressFamily.IPv4,
+                                status = TestStatus.SKIPPED,
+                                failureReason = "server unsupported",
+                            ))
                         }
                     }
                     TestType.NAT64_DISCOVERY, TestType.DNS64_VALIDATION,

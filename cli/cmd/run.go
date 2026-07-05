@@ -22,7 +22,8 @@ func RunStack(cfg diag.Config, serverCfg *diag.ServerConfig, creds *diag.TurnCre
 	var results []diag.TestResult
 	for _, tt := range cfg.Tests {
 		target := serverCfg.TargetFor(tt)
-		if target == "" {
+		// WireGuard uses the server URL directly — no separate target needed.
+		if target == "" && tt != diag.TestWireGuard {
 			ms := int64(0)
 			results = append(results, diag.TestResult{
 				TestType:      tt,
@@ -56,6 +57,8 @@ func RunStack(cfg diag.Config, serverCfg *diag.ServerConfig, creds *diag.TurnCre
 				turnCfg.TurnPayloadBytes = cfg.TurnPayload
 			}
 			r = diag.RunTURN(&turnCfg, creds, stack, cfg.TurnTransport, timeout, spinner)
+		case diag.TestWireGuard:
+			r = diag.RunWireGuard(serverCfg, cfg.ServerURL, cfg.TurnToken, transport, stack, timeout, spinner)
 		default:
 			r = diag.TestResult{
 				TestType: tt, AddressFamily: diag.AddressFamily(stack),

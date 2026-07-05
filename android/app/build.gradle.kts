@@ -89,4 +89,9 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+
+    // WireGuard native library (gomobile-generated AAR).
+    // Build via: bash android/wgmodule-build/build.sh
+    // The fileTree is a no-op when wglib.aar has not been built yet.
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 }

@@ -2,7 +2,7 @@ package selvakn.ipv6diag.data.model
 
 import kotlinx.serialization.Serializable
 
-enum class TestType { HTTP, HTTPS, ICMP, DNS, STUN, TURN, NAT64_DISCOVERY, DNS64_VALIDATION, CLAT_QUALITY, PLAT_VERIFICATION }
+enum class TestType { HTTP, HTTPS, ICMP, DNS, STUN, TURN, WIREGUARD, NAT64_DISCOVERY, DNS64_VALIDATION, CLAT_QUALITY, PLAT_VERIFICATION }
 
 enum class AddressFamily { IPv4, IPv6, XLAT }
 

@@ -259,7 +259,7 @@ private fun TestResultCard(result: TestResult, testEndpointHost: String) {
                 Text(result.status.name, color = statusColor, style = MaterialTheme.typography.labelMedium)
             }
             result.latencyMs?.let { Text("Latency: ${it}ms", style = MaterialTheme.typography.bodySmall) }
-            if (result.testType.name == "STUN" || result.testType.name == "TURN") {
+            if (result.testType.name == "STUN" || result.testType.name == "TURN" || result.testType.name == "WIREGUARD") {
                 Text("Probe target: $testEndpointHost", style = MaterialTheme.typography.bodySmall)
             }
             result.transferRateKbps?.let { Text("Transfer rate: ${"%.1f".format(it)} kbps", style = MaterialTheme.typography.bodySmall) }

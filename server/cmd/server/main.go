@@ -21,6 +21,7 @@ import (
 	"github.com/selvakn/ipv6diag-server/internal/store"
 	turnsvc "github.com/selvakn/ipv6diag-server/internal/turn"
 	"github.com/selvakn/ipv6diag-server/internal/tlsutil"
+	wgsvc "github.com/selvakn/ipv6diag-server/internal/wireguard"
 )
 
 var version = "dev"
@@ -158,6 +159,26 @@ func main() {
 		Service:     turnService,
 	}
 
+	// WireGuard service (opt-in via WG_ENABLED=true).
+	wgCfg := wgsvc.LoadConfigFromEnv()
+	var wgHandler *handler.WireGuardCredentialsHandler
+	if wgCfg.Enabled {
+		wgService, err := wgsvc.NewService(wgCfg)
+		if err != nil {
+			log.Fatalf("failed to create WireGuard service: %v", err)
+		}
+		if err := wgService.Start(); err != nil {
+			log.Fatalf("failed to start WireGuard service: %v", err)
+		}
+		defer wgService.Stop()
+		wgHandler = &handler.WireGuardCredentialsHandler{
+			Token:    os.Getenv("TOKEN"),
+			Sessions: wgService.Sessions(),
+			Service:  wgService,
+		}
+		log.Printf("WireGuard service enabled on UDP port %d", wgCfg.Port)
+	}
+
 	// Populate the plain-HTTP mux now that turnHandler is available.
 	httpMux.Handle("/", browserDiagPageHandler)
 	httpMux.Handle("/diag", &handler.DiagHandler{IsTLS: false})
@@ -173,6 +194,9 @@ func main() {
 	httpMux.Handle("/browser-diagnostics", browserDiagPageHandler)
 	httpMux.Handle("/browser-diagnostics/config", browserDiagConfigHandler)
 	httpMux.Handle("/my-ip", &handler.MyIPHandler{})
+	if wgHandler != nil {
+		httpMux.Handle("/wireguard/credentials", wgHandler)
+	}
 
 	tlsMux := http.NewServeMux()
 	tlsMux.Handle("/", browserDiagPageHandler)
@@ -189,6 +213,9 @@ func main() {
 	tlsMux.Handle("/browser-diagnostics", browserDiagPageHandler)
 	tlsMux.Handle("/browser-diagnostics/config", browserDiagConfigHandler)
 	tlsMux.Handle("/my-ip", &handler.MyIPHandler{})
+	if wgHandler != nil {
+		tlsMux.Handle("/wireguard/credentials", wgHandler)
+	}
 
 	// Create plain HTTP listeners (always)
 	listeners, err := listener.Create(*httpAddr, *http6Addr, *httpsAddr, *https6Addr, "", "")
