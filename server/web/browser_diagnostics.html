@@ -649,6 +649,31 @@ function modeHost() {
   return null;
 }
 
+// turnUriForTransport rewrites a TURN URI (or bare host) to match the selected transport.
+function turnUriForTransport(rawValue, transport) {
+  transport = (transport || "auto").toLowerCase();
+  if (transport === "auto") return rawValue; // keep server's preferred URI as-is
+
+  // Extract host from a URI like "turn:host:port?..." or bare "host"
+  let host = rawValue;
+  const lc = rawValue.toLowerCase();
+  if (lc.startsWith("turn:") || lc.startsWith("turns:")) {
+    const withProto = rawValue.replace(/^turns?:/i, (m) => m + "//");
+    try {
+      host = new URL(withProto).hostname;
+    } catch (_) {}
+  }
+
+  const specs = {
+    udp:  { scheme: "turn",  port: "3478", query: "transport=udp" },
+    tcp:  { scheme: "turn",  port: "3478", query: "transport=tcp" },
+    tls:  { scheme: "turns", port: "5349", query: "transport=tcp" },
+    dtls: { scheme: "turns", port: "5349", query: "transport=udp" },
+  };
+  const s = specs[transport] || specs.udp;
+  return `${s.scheme}:${host}:${s.port}?${s.query}`;
+}
+
 function resolveTarget(testType) {
   const cs = parseCustomServer(document.getElementById("custom-server").value);
   if (cs) {
@@ -656,11 +681,25 @@ function resolveTarget(testType) {
     if (testType === "HTTPS")      return { value: cs.https, origin: "custom" };
     if (testType === "ICMP_EQUIV") return { value: cs.https, origin: "custom" };
     if (testType === "STUN")       return { value: cs.stun,  origin: "custom" };
-    if (testType === "TURN")       return { value: cs.host,  origin: "custom" };
+    if (testType === "TURN") {
+      const transport = document.getElementById("turn-transport").value || "auto";
+      return { value: turnUriForTransport(cs.host, transport), origin: "custom" };
+    }
   }
   const mh = modeHost();
+  if (testType === "TURN") {
+    // config.default_targets has a hardcoded hostname that can be wrong when
+    // running locally or against a custom server, so derive the host from
+    // page context instead: modeHost override → current page hostname.
+    const transport = document.getElementById("turn-transport").value || "auto";
+    const host = mh || window.location.hostname;
+    return { value: turnUriForTransport(host, transport), origin: mh ? getActiveMode() : "default" };
+  }
   const exact = (config.default_targets || []).find((t) => t.test_type === testType);
-  if (exact) return { value: mh ? swapHost(exact.value, mh) : exact.value, origin: mh ? getActiveMode() : "default" };
+  if (exact) {
+    const raw = mh ? swapHost(exact.value, mh) : exact.value;
+    return { value: raw, origin: mh ? getActiveMode() : "default" };
+  }
   return { value: "", origin: "default" };
 }
 
