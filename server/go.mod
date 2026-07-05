@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/caddyserver/certmagic v0.25.4
+	github.com/pion/dtls/v3 v3.1.4
 	github.com/pion/logging v0.2.4
 	github.com/pion/turn/v4 v4.1.4
 	modernc.org/sqlite v1.53.0
@@ -19,7 +20,6 @@ require (
 	github.com/mholt/acmez/v3 v3.1.6 // indirect
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
-	github.com/pion/dtls/v3 v3.0.7 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/stun/v3 v3.0.1 // indirect
 	github.com/pion/transport/v3 v3.0.8 // indirect

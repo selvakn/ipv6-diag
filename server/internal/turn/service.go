@@ -7,6 +7,7 @@ import (
 	"net"
 	"sync"
 
+	"github.com/pion/dtls/v3"
 	"github.com/pion/logging"
 	pionturn "github.com/pion/turn/v4"
 )
@@ -35,6 +36,26 @@ func NewService(cfg Config, credentials *CredentialManager, tlsCfg *tls.Config) 
 		tlsCfg:      tlsCfg,
 		statuses:    map[string]ListenerStatus{},
 	}
+}
+
+// dtlsConfigFromTLS derives a *dtls.Config from a *tls.Config so the same
+// certificate (and SNI-selection logic) is shared between TLS/TCP and DTLS/UDP
+// TURNS listeners. Only the GetCertificate callback and the static Certificates
+// slice are bridged; transport-level settings are left at DTLS defaults.
+func dtlsConfigFromTLS(tlsCfg *tls.Config) *dtls.Config {
+	if tlsCfg == nil {
+		return nil
+	}
+	cfg := &dtls.Config{}
+	if tlsCfg.GetCertificate != nil {
+		getCert := tlsCfg.GetCertificate
+		cfg.GetCertificate = func(info *dtls.ClientHelloInfo) (*tls.Certificate, error) {
+			return getCert(&tls.ClientHelloInfo{ServerName: info.ServerName})
+		}
+	} else if len(tlsCfg.Certificates) > 0 {
+		cfg.Certificates = tlsCfg.Certificates
+	}
+	return cfg
 }
 
 func (s *Service) Start() error {
@@ -160,6 +181,58 @@ func (s *Service) Start() error {
 		}
 	}
 
+	// DTLS/UDP listeners (TURNS over UDP, port 5349). The DTLS config is derived
+	// from the TLS config so the same certificate and SNI-selection logic applies.
+	dtlsCfg := dtlsConfigFromTLS(s.tlsCfg)
+	if s.cfg.DTLS4Addr != "" {
+		if dtlsCfg == nil {
+			addStatus("dtls4", s.cfg.DTLS4Addr, "degraded", "no TLS config — set HTTPS_HOST or provide --cert/--key")
+		} else {
+			udpAddr, err := net.ResolveUDPAddr("udp4", s.cfg.DTLS4Addr)
+			if err != nil {
+				addStatus("dtls4", s.cfg.DTLS4Addr, "degraded", err.Error())
+			} else {
+				ln, err := dtls.Listen("udp4", udpAddr, dtlsCfg)
+				if err != nil {
+					addStatus("dtls4", s.cfg.DTLS4Addr, "degraded", err.Error())
+				} else {
+					listenerConfigs = append(listenerConfigs, pionturn.ListenerConfig{
+						Listener: ln,
+						RelayAddressGenerator: &pionturn.RelayAddressGeneratorNone{
+							Address: relayAddress(s.cfg.DTLS4Addr, "127.0.0.1", s.cfg.PublicIPv4),
+						},
+					})
+					closers = append(closers, func() { _ = ln.Close() })
+					addStatus("dtls4", s.cfg.DTLS4Addr, "active", "")
+				}
+			}
+		}
+	}
+	if s.cfg.DTLS6Addr != "" {
+		if dtlsCfg == nil {
+			addStatus("dtls6", s.cfg.DTLS6Addr, "degraded", "no TLS config — set HTTPS_HOST or provide --cert/--key")
+		} else {
+			udpAddr, err := net.ResolveUDPAddr("udp6", s.cfg.DTLS6Addr)
+			if err != nil {
+				addStatus("dtls6", s.cfg.DTLS6Addr, "degraded", err.Error())
+			} else {
+				ln, err := dtls.Listen("udp6", udpAddr, dtlsCfg)
+				if err != nil {
+					addStatus("dtls6", s.cfg.DTLS6Addr, "degraded", err.Error())
+				} else {
+					listenerConfigs = append(listenerConfigs, pionturn.ListenerConfig{
+						Listener: ln,
+						RelayAddressGenerator: &pionturn.RelayAddressGeneratorNone{
+							Address: bracketIPv6(relayAddress(s.cfg.DTLS6Addr, "::1", s.cfg.PublicIPv6)),
+						},
+					})
+					closers = append(closers, func() { _ = ln.Close() })
+					addStatus("dtls6", s.cfg.DTLS6Addr, "active", "")
+				}
+			}
+		}
+	}
+
 	if len(packetConfigs) == 0 && len(listenerConfigs) == 0 {
 		return fmt.Errorf("no turn listeners active")
 	}
@@ -230,8 +303,10 @@ func (s *Service) ActiveURIs(host string) []string {
 	hasUDP4 := s.statuses["udp4"].State == "active"
 	hasTCP6 := s.statuses["tcp6"].State == "active"
 	hasTCP4 := s.statuses["tcp4"].State == "active"
-	hasTLS6 := s.statuses["tls6"].State == "active"
-	hasTLS4 := s.statuses["tls4"].State == "active"
+	hasTLS6  := s.statuses["tls6"].State == "active"
+	hasTLS4  := s.statuses["tls4"].State == "active"
+	hasDTLS6 := s.statuses["dtls6"].State == "active"
+	hasDTLS4 := s.statuses["dtls4"].State == "active"
 
 	// Browsers block TURN allocation requests to loopback/localhost addresses.
 	// When the HTTP Host header resolves to loopback, substitute the machine's
@@ -250,9 +325,13 @@ func (s *Service) ActiveURIs(host string) []string {
 	}
 
 	var uris []string
-	// IPv6-first preference with IPv4 fallback; TLS (turns:) listed first within each family.
+	// Order: IPv6-first, then IPv4; encrypted (turns:) before plain (turn:)
+	// within each family; TLS/TCP before DTLS/UDP within encrypted.
 	if hasTLS6 {
 		uris = append(uris, fmt.Sprintf("turns:%s?transport=tcp", hostPortForURI(turnHost6, s.cfg.TLS6Addr, true)))
+	}
+	if hasDTLS6 {
+		uris = append(uris, fmt.Sprintf("turns:%s?transport=udp", hostPortForURI(turnHost6, s.cfg.DTLS6Addr, true)))
 	}
 	if hasUDP6 {
 		uris = append(uris, fmt.Sprintf("turn:%s?transport=udp", hostForURI(turnHost6, true)))
@@ -262,6 +341,9 @@ func (s *Service) ActiveURIs(host string) []string {
 	}
 	if hasTLS4 {
 		uris = append(uris, fmt.Sprintf("turns:%s?transport=tcp", hostPortForURI(turnHost4, s.cfg.TLS4Addr, false)))
+	}
+	if hasDTLS4 {
+		uris = append(uris, fmt.Sprintf("turns:%s?transport=udp", hostPortForURI(turnHost4, s.cfg.DTLS4Addr, false)))
 	}
 	if hasUDP4 {
 		uris = append(uris, fmt.Sprintf("turn:%s?transport=udp", hostForURI(turnHost4, false)))
