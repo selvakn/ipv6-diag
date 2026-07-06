@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	_ "golang.org/x/mobile/bind" // anchor: gomobile bind requires this module in go.mod
 )
 
 // WireGuardResult holds the outcome of a WireGuard test suitable for gomobile export.
