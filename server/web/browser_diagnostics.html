@@ -710,9 +710,12 @@ function resolveTarget(testType) {
   }
   const mh = modeHost();
   if (testType === "TURN") {
-    // config.default_targets has a hardcoded hostname that can be wrong when
-    // running locally or against a custom server, so derive the host from
-    // page context instead: modeHost override → current page hostname.
+    // If a custom TURN URL is set, use it as the displayed target too — otherwise
+    // derive from modeHost override → current page hostname.
+    const customTurnUrl = document.getElementById("custom-turn-url")?.value?.trim();
+    if (customTurnUrl) {
+      return { value: customTurnUrl, origin: "custom" };
+    }
     const transport = document.getElementById("turn-transport").value || "auto";
     const host = mh || window.location.hostname;
     return { value: turnUriForTransport(host, transport), origin: mh ? getActiveMode() : "default" };
@@ -750,7 +753,10 @@ async function runOne(testType, timeoutMs) {
         ? { uris: [`turn:${cs.host}:3478?transport=udp`, `turn:${cs.host}:3478?transport=tcp`, `turns:${cs.host}:5349?transport=tcp`, `turns:${cs.host}:5349?transport=udp`], username: user, password: pass }
         : { username: user, password: pass };
     }
-    return { ...base, ...(await runTurnTransfer(credsUrl, timeoutMs, overrideCreds, mh, turnTransport)) };
+    // Don't rewrite URI hostnames when the user explicitly supplied a custom TURN URL —
+    // uriHostOverride would replace the user's host with the modeHost, defeating the override.
+    const effectiveMh = turnUrl ? null : mh;
+    return { ...base, ...(await runTurnTransfer(credsUrl, timeoutMs, overrideCreds, effectiveMh, turnTransport)) };
   }
   return { ...base, status: "unsupported", startedAt: nowIso(), endedAt: nowIso(), durationMs: 0, reason: "Unknown test type" };
 }
