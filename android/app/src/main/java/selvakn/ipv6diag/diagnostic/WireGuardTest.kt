@@ -12,16 +12,11 @@ import java.util.UUID
 import kotlin.coroutines.resume
 
 /**
- * runWireGuardTest runs a WireGuard tunnel diagnostic.
+ * Runs a WireGuard tunnel diagnostic via the gomobile-generated wglib.aar.
  *
- * This implementation uses the gomobile-generated wglib.aar (built from wgmodule/).
- * If the native library has not been built yet, the test returns SKIPPED.
- *
- * To build wglib.aar:
- *   bash android/wgmodule-build/build.sh
- *
- * When the aar is present and the Gradle dependency is resolved, uncomment the
- * native implementation block below and remove the SKIPPED stub.
+ * The Go library manages its own virtual network interface (wireguard-go + netstack),
+ * so [network] is not used for routing — the tunnel bypasses Android's network stack.
+ * Build wglib.aar with `make wglib-build` before assembling the APK.
  */
 suspend fun runWireGuardTest(
     @Suppress("UNUSED_PARAMETER") network: Network,
@@ -32,43 +27,35 @@ suspend fun runWireGuardTest(
 ): TestResult = withContext(Dispatchers.IO) {
     val start = System.currentTimeMillis()
 
-    // --- Native integration (requires wglib.aar) ---
-    // Uncomment when wglib.aar is built via android/wgmodule-build/build.sh:
-    //
-    // val result = suspendCancellableCoroutine<wgmodule.WireGuardResult?> { cont ->
-    //     val callback = object : wgmodule.WireGuardCallback {
-    //         override fun onResult(result: wgmodule.WireGuardResult?, errMsg: String?) {
-    //             cont.resume(result)
-    //         }
-    //     }
-    //     wgmodule.Wgmodule.runWireGuardTestAsync(serverURL, token, addressFamily.name.lowercase(), callback)
-    //     cont.invokeOnCancellation { /* goroutine cannot be cancelled; it will complete naturally */ }
-    // }
-    // val latency = System.currentTimeMillis() - start
-    // if (result == null) {
-    //     return@withContext skippedResult(sessionId, addressFamily, latency, "native library error")
-    // }
-    // return@withContext when (result.status) {
-    //     "pass" -> TestResult(
-    //         id = UUID.randomUUID().toString(),
-    //         sessionId = sessionId,
-    //         testType = TestType.WIREGUARD,
-    //         addressFamily = addressFamily,
-    //         status = TestStatus.PASS,
-    //         latencyMs = result.avgRTTMs.toDoubleOrNull()?.toLong(),
-    //         transferRateKbps = result.rateKbps.toDoubleOrNull(),
-    //         bytesSent = result.bytesSent.toLongOrNull(),
-    //         bytesReceived = result.bytesReceived.toLongOrNull(),
-    //         timestamp = System.currentTimeMillis(),
-    //     )
-    //     "skipped" -> skippedResult(sessionId, addressFamily, latency, result.failureReason)
-    //     else -> failResult(sessionId, addressFamily, latency, result.failureReason)
-    // }
-    // --- End native integration ---
-
-    // Placeholder: return SKIPPED until wglib.aar is built.
+    val result = suspendCancellableCoroutine<wgmodule.WireGuardResult?> { cont ->
+        val callback = object : wgmodule.WireGuardCallback {
+            override fun onResult(result: wgmodule.WireGuardResult?, errMsg: String?) {
+                cont.resume(result)
+            }
+        }
+        wgmodule.Wgmodule.runWireGuardTestAsync(serverURL, token, addressFamily.name.lowercase(), callback)
+        cont.invokeOnCancellation { /* goroutine cannot be cancelled; it will complete naturally */ }
+    }
     val latency = System.currentTimeMillis() - start
-    skippedResult(sessionId, addressFamily, latency, "wglib.aar not built — run android/wgmodule-build/build.sh")
+    if (result == null) {
+        return@withContext skippedResult(sessionId, addressFamily, latency, "native library error")
+    }
+    return@withContext when (result.status) {
+        "pass" -> TestResult(
+            id = UUID.randomUUID().toString(),
+            sessionId = sessionId,
+            testType = TestType.WIREGUARD,
+            addressFamily = addressFamily,
+            status = TestStatus.PASS,
+            latencyMs = result.avgRTTMs.toDoubleOrNull()?.toLong(),
+            transferRateKbps = result.rateKbps.toDoubleOrNull(),
+            bytesSent = result.bytesSent.toLongOrNull(),
+            bytesReceived = result.bytesReceived.toLongOrNull(),
+            timestamp = System.currentTimeMillis(),
+        )
+        "skipped" -> skippedResult(sessionId, addressFamily, latency, result.failureReason)
+        else -> failResult(sessionId, addressFamily, latency, result.failureReason)
+    }
 }
 
 private fun skippedResult(sessionId: String, family: AddressFamily, latencyMs: Long, reason: String) = TestResult(
