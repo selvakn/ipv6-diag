@@ -95,6 +95,11 @@
         </div>
         <div class="hint" id="custom-server-hint" style="padding-left:4px"></div>
         <div class="row" style="margin-bottom:0">
+          <label>TURN server URL</label>
+          <input id="custom-turn-url" placeholder="turns:host:5349?transport=tcp" style="min-width:320px">
+          <span class="hint">Override TURN server (leave blank to use server default)</span>
+        </div>
+        <div class="row" style="margin-bottom:0">
           <label>TURN credentials</label>
           <input id="custom-turn-user" placeholder="username" style="width:160px">
           <input id="custom-turn-pass" type="password" placeholder="password" style="width:160px">
@@ -715,11 +720,15 @@ async function runOne(testType, timeoutMs) {
     const credsUrl = cs ? cs.credsUrl
       : mh ? `https://${mh}/turn/credentials`
       : "/turn/credentials";
+    const turnUrl  = document.getElementById("custom-turn-url").value.trim();
     const user = document.getElementById("custom-turn-user").value.trim();
     const pass = document.getElementById("custom-turn-pass").value.trim();
     const turnTransport = document.getElementById("turn-transport").value || "auto";
     let overrideCreds = null;
-    if (user && pass) {
+    if (turnUrl) {
+      // Full override: explicit TURN URL + optional credentials supplied.
+      overrideCreds = { uris: [turnUrl], username: user || undefined, password: pass || undefined };
+    } else if (user && pass) {
       overrideCreds = cs
         ? { uris: [`turn:${cs.host}:3478?transport=udp`, `turn:${cs.host}:3478?transport=tcp`, `turns:${cs.host}:5349?transport=tcp`, `turns:${cs.host}:5349?transport=udp`], username: user, password: pass }
         : { username: user, password: pass };
