@@ -21,7 +21,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Stage 1: NDK + gomobile base (heavy; rarely changes) ─────────────────────
-FROM golang:1.24-bookworm AS ndk-base
+FROM golang:1.25-bookworm AS ndk-base
 
 ARG CMDLINE_TOOLS_BUILD=11076708
 ARG ANDROID_NDK_VERSION=25.2.9519653

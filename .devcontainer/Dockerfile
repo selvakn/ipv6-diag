@@ -12,7 +12,7 @@
 # rebuilds only happen when this file or devcontainer.json changes.
 # ─────────────────────────────────────────────────────────────────────────────
 
-FROM golang:1.24-bookworm
+FROM golang:1.25-bookworm
 
 ARG CMDLINE_TOOLS_BUILD=11076708
 ARG ANDROID_NDK_VERSION=25.2.9519653
