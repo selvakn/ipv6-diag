@@ -6,3 +6,4 @@ capabilities:
     - fly
     - mise
     - android
+    - docker
