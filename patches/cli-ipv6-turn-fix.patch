@@ -1,0 +1,39 @@
+diff --git a/cli/go.mod b/cli/go.mod
+index 2f13918..9513c5c 100644
+--- a/cli/go.mod
++++ b/cli/go.mod
+@@ -41,3 +41,5 @@ require (
+ )
+ 
+ replace github.com/selvakn/ipv6diag-wg => ../wgmodule
++
++replace github.com/pion/ice/v4 => ../third_party/pion-ice-v4-ipv6fix
+diff --git a/cli/go.sum b/cli/go.sum
+index 2ee52b8..ed9f9d6 100644
+--- a/cli/go.sum
++++ b/cli/go.sum
+@@ -12,8 +12,6 @@ github.com/pion/datachannel v1.6.2 h1:7EXQ8TH3vTouBUdRWYbcX2edSx9Yj6k5zl5P+qyxEP
+ github.com/pion/datachannel v1.6.2/go.mod h1:pzbdAZvyGtXbcHM1hBbsFaOTf40lZizU/dNlvVOak6E=
+ github.com/pion/dtls/v3 v3.1.4 h1:QhvtMflMfu9Kf0RcDC5BJBle4caPskByrKQR6uuYqpY=
+ github.com/pion/dtls/v3 v3.1.4/go.mod h1:cr/qotLISUw/9C1m83ZPNZtj9WnXkYLpfCptPqbkInc=
+-github.com/pion/ice/v4 v4.2.7 h1:zDEbC6MiEdhQpF8TxBOTws+NU6ZgGpveHrQq4Lc1kao=
+-github.com/pion/ice/v4 v4.2.7/go.mod h1:9SNPaq0c7El/ki8leJzyCkK10zsskprR3zTNbO3monY=
+ github.com/pion/interceptor v0.1.45 h1:6PUo/5829bIfRFIPPJQzuDn8EjxRTSB/CSD7QVCOaqo=
+ github.com/pion/interceptor v0.1.45/go.mod h1:gNDYM/uFKcLe/B3gS2/7+aw6z+RDiMy2qKTnF1LO31w=
+ github.com/pion/logging v0.2.4 h1:tTew+7cmQ+Mc1pTBLKH2puKsOvhm32dROumOZ655zB8=
+diff --git a/home/selva/projects/Lenovo/Mesh/AndroidIPv6Diag/.gomodcache/github.com/pion/ice/v4@v4.2.7/gather.go b/home/selva/projects/Lenovo/Mesh/AndroidIPv6Diag/third_party/pion-ice-v4-ipv6fix/gather.go
+index 6b9573b..2487108 100644
+--- a/home/selva/projects/Lenovo/Mesh/AndroidIPv6Diag/.gomodcache/github.com/pion/ice/v4@v4.2.7/gather.go
++++ b/home/selva/projects/Lenovo/Mesh/AndroidIPv6Diag/third_party/pion-ice-v4-ipv6fix/gather.go
+@@ -980,11 +980,6 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) {
+ 		}
+ 
+ 		for _, networkType := range networkTypes {
+-			// IPv6 TURN support is not finished yet, so skip for now.
+-			if networkType.IsIPv6() {
+-				continue
+-			}
+-
+ 			network := networkType.String()
+ 			bindAddrs := []string{}
+ 			if !useFilteredLocalAddrs { // nolint:nestif

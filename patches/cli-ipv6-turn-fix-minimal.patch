@@ -1,0 +1,26 @@
+diff --git a/cli/go.mod b/cli/go.mod
+index 2f13918..9513c5c 100644
+--- a/cli/go.mod
++++ b/cli/go.mod
+@@ -41,3 +41,5 @@ require (
+ )
+ 
+ replace github.com/selvakn/ipv6diag-wg => ../wgmodule
++
++replace github.com/pion/ice/v4 => ../third_party/pion-ice-v4-ipv6fix
+diff --git a/third_party/pion-ice-v4-ipv6fix/gather.go b/third_party/pion-ice-v4-ipv6fix/gather.go
+index 6b9573b..2487108 100644
+--- a/third_party/pion-ice-v4-ipv6fix/gather.go
++++ b/third_party/pion-ice-v4-ipv6fix/gather.go
+@@ -980,11 +980,6 @@ func (a *Agent) gatherCandidatesRelay(ctx context.Context, urls []*stun.URI) {
+ 		}
+ 
+ 		for _, networkType := range networkTypes {
+-			// IPv6 TURN support is not finished yet, so skip for now.
+-			if networkType.IsIPv6() {
+-				continue
+-			}
+-
+ 			network := networkType.String()
+ 			bindAddrs := []string{}
+ 			if !useFilteredLocalAddrs { // nolint:nestif

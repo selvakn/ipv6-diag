@@ -41,3 +41,5 @@ require (
 )
 
 replace github.com/selvakn/ipv6diag-wg => ../wgmodule
+
+replace github.com/pion/ice/v4 => ../third_party/pion-ice-v4-ipv6fix
