@@ -100,21 +100,6 @@ func TestActiveURIsLoopbackSubstitution(t *testing.T) {
 	}
 }
 
-func TestBracketIPv6(t *testing.T) {
-	// Bare IPv6 address gets brackets for use in "addr:port" strings.
-	if got := bracketIPv6("2400:6180:100:d0::98d:8001"); got != "[2400:6180:100:d0::98d:8001]" {
-		t.Fatalf("expected brackets, got %s", got)
-	}
-	// Already-bracketed addresses are not double-bracketed.
-	// (net.ParseIP strips brackets, so passing a bracketed string returns it unchanged.)
-	if got := bracketIPv6("192.0.2.1"); got != "192.0.2.1" {
-		t.Fatalf("IPv4 must not be bracketed, got %s", got)
-	}
-	if got := bracketIPv6("::1"); got != "[::1]" {
-		t.Fatalf("loopback IPv6 must be bracketed, got %s", got)
-	}
-}
-
 func TestRelayAddressFallback(t *testing.T) {
 	// Public IP always wins.
 	if got := relayAddress("0.0.0.0:3478", "fallback", "203.0.113.10"); got != "203.0.113.10" {

@@ -7,3 +7,4 @@ capabilities:
     - mise
     - android
     - docker
+    - dev-browser
