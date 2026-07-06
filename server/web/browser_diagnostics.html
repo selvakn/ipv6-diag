@@ -266,6 +266,23 @@ function isLocalhostHost(host) {
   return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
 }
 
+// Returns true if a TURN URI's host is private/loopback (RFC1918 / loopback).
+// Browsers block TURN allocation to private IPs from localhost pages, so we
+// only need to relax iceTransportPolicy when the TURN server is also private.
+function isTurnUriPrivate(uri) {
+  try {
+    // turn/turns URIs are not parsed by URL() directly; strip scheme first.
+    const withoutScheme = uri.replace(/^turns?:\/?\/?/, "").replace(/\?.*$/, "");
+    const host = withoutScheme.split(":")[0];
+    const h = host.toLowerCase();
+    if (isLocalhostHost(h)) return true;
+    if (/^10\./.test(h)) return true;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
+    if (/^192\.168\./.test(h)) return true;
+    return false;
+  } catch { return false; }
+}
+
 // sanitizeTurnUris filters and normalizes TURN URIs by scheme/transport.
 // transport: "auto" = all URIs in server order (let ICE negotiate),
 //            "udp"  = turn:?transport=udp, "tcp" = turn:?transport=tcp,
@@ -375,12 +392,12 @@ async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds, uriHost
 
   const iceServer = { urls: turnUris, username: creds.username, credential: creds.password };
   // Browsers (Firefox, Chrome) block TURN allocation to private/RFC1918 IPs from a
-  // localhost page as a Local Network Access security measure. On localhost we relax
-  // to "all" so the two PeerConnections can still connect (via host candidates) and
-  // produce meaningful latency/throughput metrics. On a public origin, "relay" forces
-  // the connection to go through the TURN relay as intended.
+  // localhost page as a Local Network Access security measure. Relax to "all" only
+  // when BOTH the page AND the TURN server are local — a public TURN server is always
+  // reachable from localhost, so enforce "relay" to catch bad credentials.
   const localPage = isLocalhostHost(window.location.hostname);
-  const iceTransportPolicy = localPage ? "all" : "relay";
+  const turnIsPrivate = turnUris.every(isTurnUriPrivate);
+  const iceTransportPolicy = (localPage && turnIsPrivate) ? "all" : "relay";
   const pcA = new RTCPeerConnection({ iceServers: [iceServer], iceTransportPolicy });
   const pcB = new RTCPeerConnection({ iceServers: [iceServer], iceTransportPolicy });
   const bridge = setupPeerBridge(pcA, pcB);
@@ -522,7 +539,7 @@ async function runTurnTransfer(credentialsUrl, timeoutMs, overrideCreds, uriHost
   const status = passed ? "passed" : "failed";
   const reason = passed ? "" : "Delivery quality below threshold or transfer window incomplete";
 
-  const modeNote = localPage ? " (host-candidate mode; relay blocked on localhost)" : " (relay-only)";
+  const modeNote = (localPage && turnIsPrivate) ? " (host-candidate mode; relay blocked on localhost)" : " (relay-only)";
   return {
     status,
     target: turnUris.join(" "),
