@@ -117,15 +117,23 @@ func FetchPrerequisites(cfg diag.Config) (*diag.ServerConfig, *diag.TurnCredenti
 
 	var creds *diag.TurnCredentials
 	for _, tt := range cfg.Tests {
-		if tt == diag.TestTURN {
-			if serverCfg.TurnCredentialMode != "none" {
-				creds, err = diag.FetchTurnCredentials(cfg.ServerURL, cfg.TurnToken, transport)
-				if err != nil {
-					return serverCfg, nil, fmt.Errorf("fetching TURN credentials: %w", err)
-				}
-			}
-			break
+		if tt != diag.TestTURN {
+			continue
 		}
+		// --turn-url overrides server-issued credentials entirely.
+		if cfg.TurnURL != "" {
+			creds = &diag.TurnCredentials{
+				URIs:     []string{cfg.TurnURL},
+				Username: cfg.TurnUsername,
+				Password: cfg.TurnPassword,
+			}
+		} else if serverCfg.TurnCredentialMode != "none" {
+			creds, err = diag.FetchTurnCredentials(cfg.ServerURL, cfg.TurnToken, transport)
+			if err != nil {
+				return serverCfg, nil, fmt.Errorf("fetching TURN credentials: %w", err)
+			}
+		}
+		break
 	}
 	return serverCfg, creds, nil
 }

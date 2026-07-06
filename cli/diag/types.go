@@ -39,6 +39,10 @@ type Config struct {
 	TurnTransport  string // "", "auto", "udp", "tcp", "tls", "dtls"
 	TurnMPS        int    // 0 = use server default
 	TurnPayload    int    // bytes, 0 = use server default
+	// Optional TURN override — when set, bypasses /turn/credentials entirely.
+	TurnURL      string // e.g. "turn:example.com:3478"
+	TurnUsername string
+	TurnPassword string
 	Upload         bool
 	Insecure       bool
 	InsecureUpload bool

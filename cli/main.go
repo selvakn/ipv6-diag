@@ -31,6 +31,9 @@ func main() {
 		flagTurnTransport = flag.String("turn-transport", "auto", "TURN transport: auto, udp, tcp, tls (TURNS/TCP), dtls (TURNS/UDP)")
 		flagTurnMPS       = flag.Int("turn-mps", 0, "Override TURN messages per second (0 = use server default)")
 		flagTurnPayload   = flag.Int("turn-payload", 0, "Override TURN payload size in bytes (0 = use server default)")
+		flagTurnURL      = flag.String("turn-url", "", "Custom TURN server URL (e.g. turn:host:3478). Bypasses /turn/credentials when set.")
+		flagTurnUsername = flag.String("turn-username", "", "Username for custom TURN server (used with --turn-url)")
+		flagTurnPassword = flag.String("turn-password", "", "Password for custom TURN server (used with --turn-url)")
 		flagUpload        = flag.Bool("upload", false, "POST results to /api/reports after run")
 		flagInsecure      = flag.Bool("insecure", false, "Skip TLS certificate verification")
 		flagInsecureUpload = flag.Bool("insecure-upload", false, "Allow --upload when --insecure is active")
@@ -85,6 +88,9 @@ func main() {
 		TurnTransport:  *flagTurnTransport,
 		TurnMPS:        *flagTurnMPS,
 		TurnPayload:    *flagTurnPayload,
+		TurnURL:        *flagTurnURL,
+		TurnUsername:   *flagTurnUsername,
+		TurnPassword:   *flagTurnPassword,
 		Upload:         *flagUpload,
 		Insecure:       *flagInsecure,
 		InsecureUpload: *flagInsecureUpload,
