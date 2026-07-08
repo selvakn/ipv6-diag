@@ -3,6 +3,7 @@ package selvakn.ipv6diag.ui.home
 import android.app.Application
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,8 +36,9 @@ import androidx.navigation.NavController
 import selvakn.ipv6diag.IPv6DiagApplication
 import selvakn.ipv6diag.diagnostic.DeviceInfoCollector
 import selvakn.ipv6diag.diagnostic.DiagnosticRunner
+import selvakn.ipv6diag.diagnostic.IpMode
 import selvakn.ipv6diag.diagnostic.NetworkInfoCollector
-import selvakn.ipv6diag.diagnostic.TestFilter
+import selvakn.ipv6diag.diagnostic.TestCategory
 import selvakn.ipv6diag.upload.UploadStatus
 import selvakn.ipv6diag.upload.uploadReport
 import kotlinx.coroutines.launch
@@ -50,7 +52,8 @@ fun HomeScreen(navController: NavController) {
     val snackbar = remember { SnackbarHostState() }
 
     var isRunning by remember { mutableStateOf(false) }
-    var selectedFilter by remember { mutableStateOf(TestFilter.ALL) }
+    var selectedCategories by remember { mutableStateOf(TestCategory.entries.toSet()) }
+    var selectedIpMode by remember { mutableStateOf(IpMode.AUTO) }
 
     val runner = remember {
         DiagnosticRunner(context, app.sessionRepository, NetworkInfoCollector(context))
@@ -69,12 +72,45 @@ fun HomeScreen(navController: NavController) {
         ) {
             Text("Protocol Filter", style = MaterialTheme.typography.labelMedium)
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TestFilter.entries.forEach { f ->
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = selectedCategories.size == TestCategory.entries.size,
+                    onClick = { selectedCategories = TestCategory.entries.toSet() },
+                    label = { Text("ALL") },
+                )
+                TestCategory.entries.forEach { category ->
                     FilterChip(
-                        selected = selectedFilter == f,
-                        onClick = { selectedFilter = f },
-                        label = { Text(f.name.replace("_", "/")) },
+                        selected = category in selectedCategories,
+                        onClick = {
+                            selectedCategories = if (category in selectedCategories) {
+                                selectedCategories - category
+                            } else {
+                                selectedCategories + category
+                            }
+                        },
+                        label = { Text(category.name.replace("_", "/")) },
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Text("IP Stack", style = MaterialTheme.typography.labelMedium)
+            Spacer(Modifier.height(8.dp))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                IpMode.entries.forEach { mode ->
+                    FilterChip(
+                        selected = selectedIpMode == mode,
+                        onClick = { selectedIpMode = mode },
+                        label = { Text(ipModeLabel(mode)) },
                     )
                 }
             }
@@ -96,7 +132,7 @@ fun HomeScreen(navController: NavController) {
                                     snackbar.showSnackbar("No server configured. Check Settings.")
                                     return@launch
                                 }
-                                val session = runner.runTests(endpoint, selectedFilter)
+                                val session = runner.runTests(endpoint, selectedCategories, selectedIpMode)
                                 // Auto-upload: mark uploading, then fire-and-forget
                                 app.setUploadStatus(session.id, UploadStatus.Uploading)
                                 launch {
@@ -113,9 +149,13 @@ fun HomeScreen(navController: NavController) {
                             }
                         }
                     },
+                    enabled = selectedCategories.isNotEmpty(),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Run ${selectedFilter.name.replace("_", "/")} Tests")
+                    Text(
+                        if (selectedCategories.isEmpty()) "Select a test to run"
+                        else "Run Tests (${selectedCategories.size})"
+                    )
                 }
             }
 
@@ -131,4 +171,10 @@ fun HomeScreen(navController: NavController) {
             }
         }
     }
+}
+
+private fun ipModeLabel(mode: IpMode): String = when (mode) {
+    IpMode.AUTO -> "Auto"
+    IpMode.IPV4_ONLY -> "IPv4 only"
+    IpMode.IPV6_ONLY -> "IPv6 only"
 }

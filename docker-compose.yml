@@ -42,6 +42,8 @@ services:
       --http6-addr=[::]:80
     ports:
       - "8080:80"          # IPv4 HTTP from host
+      - "3478:3478/udp"    # TURN — plain UDP (turn:...?transport=udp)
+      - "3478:3478/tcp"    # TURN — plain TCP (turn:...?transport=tcp)
       # - "51820:51820/udp"  # WireGuard — uncomment together with WG_ENABLED below
     networks:
       diag:
@@ -55,6 +57,9 @@ services:
       start_period: 5s
     environment:
       - TZ=UTC
+      # TURN service. No TLS cert in local mode, so only the plain udp/tcp
+      # listeners (port 3478) come up — tls/dtls (port 5349) stay degraded.
+      - TURN_ENABLED=true
       # WireGuard service (opt-in). Uncomment and set WG_PUBLIC_ENDPOINT to your
       # server's public IP:port when running in a network-accessible deployment.
       # Also expose UDP port 51820 in the ports block below when enabling.

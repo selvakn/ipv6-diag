@@ -7,17 +7,13 @@ import selvakn.ipv6diag.data.model.TestStatus
 import selvakn.ipv6diag.data.model.TestType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.InputStream
-import java.io.OutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.PortUnreachableException
-import java.net.Socket
 import java.net.SocketTimeoutException
 import java.security.SecureRandom
 import java.util.UUID
-import javax.net.ssl.SSLSocketFactory
 
 private const val STUN_MAGIC_COOKIE = 0x2112A442
 private const val UDP_TIMEOUT_MS = 3000
@@ -61,6 +57,11 @@ suspend fun runStunTest(
 
 // transport values: "udp" (default), "tcp", "tls", "dtls"
 // Port convention: 3478 for udp/tcp, 5349 for tls/dtls.
+//
+// This performs a real TURN (RFC 5766) Allocate + CreatePermission + Send/Data-Indication
+// relay test (see TurnProtocol.kt) — a real TURN server does not echo raw bytes sent
+// straight to its listener port, so `credentials` (fetched from /turn/credentials) is
+// required. If null, TURN is unsupported/disabled on the server and the test is skipped.
 suspend fun runTurnTest(
     network: Network,
     sessionId: String,
@@ -72,224 +73,17 @@ suspend fun runTurnTest(
     messagesPerSecond: Int,
     qualityThresholdRatio: Float,
     transport: String = "udp",
-): TestResult = when (transport.lowercase()) {
-    "tcp" -> runTurnTestTcp(network, sessionId, targetIp, targetPort, addressFamily, transferWindowSeconds, payloadSizeBytes, messagesPerSecond, qualityThresholdRatio, tls = false)
-    "tls" -> runTurnTestTcp(network, sessionId, targetIp, targetPort, addressFamily, transferWindowSeconds, payloadSizeBytes, messagesPerSecond, qualityThresholdRatio, tls = true)
-    else  -> runTurnTestUdp(network, sessionId, targetIp, targetPort, addressFamily, transferWindowSeconds, payloadSizeBytes, messagesPerSecond, qualityThresholdRatio)
-}
-
-// UDP path — shared by both "udp" and "dtls" (dtls = raw UDP to port 5349).
-private suspend fun runTurnTestUdp(
-    network: Network,
-    sessionId: String,
-    targetIp: String,
-    targetPort: Int,
-    addressFamily: AddressFamily,
-    transferWindowSeconds: Int,
-    payloadSizeBytes: Int,
-    messagesPerSecond: Int,
-    qualityThresholdRatio: Float,
-): TestResult = withContext(Dispatchers.IO) {
-    val startedAt = System.currentTimeMillis()
-    val durationMs = transferWindowSeconds.coerceAtLeast(1) * 1000L
-    val cadenceMs = (1000L / messagesPerSecond.coerceAtLeast(1)).coerceAtLeast(5L)
-    val payloadSize = payloadSizeBytes.coerceAtLeast(64)
-    val payload = ByteArray(payloadSize) { ((it % 251) + 1).toByte() }
-
-    val socketA = DatagramSocket()
-    val socketB = DatagramSocket()
-    try {
-        network.bindSocket(socketA)
-        network.bindSocket(socketB)
-        socketA.soTimeout = 400
-        socketB.soTimeout = 400
-        socketA.connect(InetSocketAddress(targetIp, targetPort))
-        socketB.connect(InetSocketAddress(targetIp, targetPort))
-    } catch (e: Exception) {
-        socketA.close()
-        socketB.close()
-        return@withContext failResult(sessionId, TestType.TURN, addressFamily, 0, targetIp, e.message ?: "failed to bind TURN clients")
+    credentials: TurnCredentials?,
+): TestResult {
+    if (credentials == null) {
+        return unsupportedResult(sessionId, TestType.TURN, addressFamily, 0, targetIp)
     }
-
-    var bytesSent = 0L
-    var bytesReceived = 0L
-    var sentPackets = 0
-    var recvPackets = 0
-    var rttSamples = 0
-    var totalRttMs = 0L
-    val recvBufA = ByteArray((payloadSize + 256).coerceAtLeast(1024))
-    val recvBufB = ByteArray((payloadSize + 256).coerceAtLeast(1024))
-
-    while (System.currentTimeMillis() - startedAt < durationMs) {
-        val loopStart = System.currentTimeMillis()
-        try {
-            val pktA = DatagramPacket(payload, payload.size)
-            val pktB = DatagramPacket(payload, payload.size)
-            val sentAtA = System.currentTimeMillis()
-            socketA.send(pktA)
-            socketB.send(pktB)
-            bytesSent += (payload.size * 2).toLong()
-            sentPackets += 2
-
-            val rpA = DatagramPacket(recvBufA, recvBufA.size)
-            val rpB = DatagramPacket(recvBufB, recvBufB.size)
-            try {
-                socketA.receive(rpA)
-                bytesReceived += rpA.length.toLong()
-                recvPackets += 1
-                totalRttMs += (System.currentTimeMillis() - sentAtA)
-                rttSamples += 1
-            } catch (_: SocketTimeoutException) {}
-            try {
-                socketB.receive(rpB)
-                bytesReceived += rpB.length.toLong()
-                recvPackets += 1
-            } catch (_: SocketTimeoutException) {}
-        } catch (e: Exception) {
-            socketA.close()
-            socketB.close()
-            val elapsed = System.currentTimeMillis() - startedAt
-            return@withContext failResult(
-                sessionId = sessionId, testType = TestType.TURN, family = addressFamily,
-                latencyMs = elapsed, resolvedAddress = targetIp,
-                reason = e.message ?: "transfer loop failed",
-            ).copy(
-                transferRateKbps = if (elapsed > 0) (bytesReceived * 8.0) / (elapsed / 1000.0) / 1000.0 else null,
-                bytesSent = bytesSent, bytesReceived = bytesReceived,
-                deliveryQualityRatio = if (sentPackets > 0) recvPackets.toFloat() / sentPackets.toFloat() else null,
-                qualityThresholdRatio = qualityThresholdRatio,
-                transferWindowSeconds = transferWindowSeconds,
-                payloadProfile = "${payloadSize}B@${messagesPerSecond.coerceAtLeast(1)}Hz",
-            )
-        }
-        val remaining = cadenceMs - (System.currentTimeMillis() - loopStart)
-        if (remaining > 0) Thread.sleep(remaining)
+    return when (transport.lowercase()) {
+        "tcp" -> runTurnTestReal(network, sessionId, targetIp, targetPort, addressFamily, transferWindowSeconds, payloadSizeBytes, messagesPerSecond, qualityThresholdRatio, credentials, TurnTransportKind.TCP)
+        "tls" -> runTurnTestReal(network, sessionId, targetIp, targetPort, addressFamily, transferWindowSeconds, payloadSizeBytes, messagesPerSecond, qualityThresholdRatio, credentials, TurnTransportKind.TLS)
+        "dtls" -> failResult(sessionId, TestType.TURN, addressFamily, 0, targetIp, "DTLS/UDP (TURNS) not supported by the Android client")
+        else -> runTurnTestReal(network, sessionId, targetIp, targetPort, addressFamily, transferWindowSeconds, payloadSizeBytes, messagesPerSecond, qualityThresholdRatio, credentials, TurnTransportKind.UDP)
     }
-
-    socketA.close()
-    socketB.close()
-    val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(1)
-    val deliveryRatio = if (sentPackets > 0) recvPackets.toFloat() / sentPackets.toFloat() else 0f
-    val rtt = if (rttSamples > 0) totalRttMs / rttSamples else elapsed
-    val transferRate = (bytesReceived * 8.0) / (elapsed / 1000.0) / 1000.0
-    val qualityOk = deliveryRatio >= qualityThresholdRatio
-    val windowOk = elapsed >= (durationMs - 500)
-    val baseResult = if (qualityOk && windowOk) {
-        passResult(sessionId, TestType.TURN, addressFamily, rtt, targetIp)
-    } else {
-        failResult(sessionId, TestType.TURN, addressFamily, rtt, targetIp,
-            if (!windowOk) "transfer window incomplete" else "delivery quality below threshold")
-    }
-    return@withContext baseResult.copy(
-        transferRateKbps = transferRate, bytesSent = bytesSent, bytesReceived = bytesReceived,
-        deliveryQualityRatio = deliveryRatio, qualityThresholdRatio = qualityThresholdRatio,
-        transferWindowSeconds = transferWindowSeconds,
-        payloadProfile = "${payloadSize}B@${messagesPerSecond.coerceAtLeast(1)}Hz",
-    )
-}
-
-// TCP / TLS path — sends repeated bursts over a single stream socket.
-private suspend fun runTurnTestTcp(
-    network: Network,
-    sessionId: String,
-    targetIp: String,
-    targetPort: Int,
-    addressFamily: AddressFamily,
-    transferWindowSeconds: Int,
-    payloadSizeBytes: Int,
-    messagesPerSecond: Int,
-    qualityThresholdRatio: Float,
-    tls: Boolean,
-): TestResult = withContext(Dispatchers.IO) {
-    val startedAt = System.currentTimeMillis()
-    val durationMs = transferWindowSeconds.coerceAtLeast(1) * 1000L
-    val cadenceMs = (1000L / messagesPerSecond.coerceAtLeast(1)).coerceAtLeast(5L)
-    val payloadSize = payloadSizeBytes.coerceAtLeast(64)
-    val payload = ByteArray(payloadSize) { ((it % 251) + 1).toByte() }
-
-    val socket: Socket = try {
-        val raw = if (tls) {
-            SSLSocketFactory.getDefault().createSocket()
-        } else {
-            Socket()
-        }
-        network.bindSocket(raw)
-        raw.connect(InetSocketAddress(targetIp, targetPort), 5000)
-        raw.soTimeout = 400
-        raw
-    } catch (e: Exception) {
-        return@withContext failResult(sessionId, TestType.TURN, addressFamily, 0, targetIp,
-            "connect failed: " + (e.message ?: "unknown"))
-    }
-
-    var bytesSent = 0L
-    var bytesReceived = 0L
-    var sentPackets = 0
-    var recvPackets = 0
-    var rttSamples = 0
-    var totalRttMs = 0L
-    val recvBuf = ByteArray((payloadSize + 256).coerceAtLeast(1024))
-
-    try {
-        val out: OutputStream = socket.getOutputStream()
-        val inp: InputStream = socket.getInputStream()
-        while (System.currentTimeMillis() - startedAt < durationMs) {
-            val loopStart = System.currentTimeMillis()
-            val sentAt = System.currentTimeMillis()
-            out.write(payload)
-            out.flush()
-            bytesSent += payload.size.toLong()
-            sentPackets += 1
-
-            try {
-                val n = inp.read(recvBuf)
-                if (n > 0) {
-                    bytesReceived += n.toLong()
-                    recvPackets += 1
-                    totalRttMs += (System.currentTimeMillis() - sentAt)
-                    rttSamples += 1
-                }
-            } catch (_: SocketTimeoutException) {}
-
-            val remaining = cadenceMs - (System.currentTimeMillis() - loopStart)
-            if (remaining > 0) Thread.sleep(remaining)
-        }
-    } catch (e: Exception) {
-        socket.close()
-        val elapsed = System.currentTimeMillis() - startedAt
-        return@withContext failResult(
-            sessionId = sessionId, testType = TestType.TURN, family = addressFamily,
-            latencyMs = elapsed, resolvedAddress = targetIp,
-            reason = e.message ?: "tcp transfer failed",
-        ).copy(
-            transferRateKbps = if (elapsed > 0) (bytesReceived * 8.0) / (elapsed / 1000.0) / 1000.0 else null,
-            bytesSent = bytesSent, bytesReceived = bytesReceived,
-            deliveryQualityRatio = if (sentPackets > 0) recvPackets.toFloat() / sentPackets.toFloat() else null,
-            qualityThresholdRatio = qualityThresholdRatio,
-            transferWindowSeconds = transferWindowSeconds,
-            payloadProfile = "${payloadSize}B@${messagesPerSecond.coerceAtLeast(1)}Hz",
-        )
-    }
-
-    socket.close()
-    val elapsed = (System.currentTimeMillis() - startedAt).coerceAtLeast(1)
-    val deliveryRatio = if (sentPackets > 0) recvPackets.toFloat() / sentPackets.toFloat() else 0f
-    val rtt = if (rttSamples > 0) totalRttMs / rttSamples else elapsed
-    val transferRate = (bytesReceived * 8.0) / (elapsed / 1000.0) / 1000.0
-    val qualityOk = deliveryRatio >= qualityThresholdRatio
-    val windowOk = elapsed >= (durationMs - 500)
-    val baseResult = if (qualityOk && windowOk) {
-        passResult(sessionId, TestType.TURN, addressFamily, rtt, targetIp)
-    } else {
-        failResult(sessionId, TestType.TURN, addressFamily, rtt, targetIp,
-            if (!windowOk) "transfer window incomplete" else "delivery quality below threshold")
-    }
-    return@withContext baseResult.copy(
-        transferRateKbps = transferRate, bytesSent = bytesSent, bytesReceived = bytesReceived,
-        deliveryQualityRatio = deliveryRatio, qualityThresholdRatio = qualityThresholdRatio,
-        transferWindowSeconds = transferWindowSeconds,
-        payloadProfile = "${payloadSize}B@${messagesPerSecond.coerceAtLeast(1)}Hz",
-    )
 }
 
 private fun passResult(

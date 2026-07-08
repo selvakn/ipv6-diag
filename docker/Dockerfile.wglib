@@ -28,11 +28,12 @@ ARG ANDROID_NDK_VERSION=25.2.9519653
 
 ENV ANDROID_HOME=/opt/android-sdk \
     GOTOOLCHAIN=local \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF-8
 ENV PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        openjdk-21-jdk wget unzip \
+        openjdk-17-jdk wget unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Android command-line tools
@@ -44,9 +45,10 @@ RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
     && mv /tmp/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest" \
     && rm /tmp/ct.zip
 
-# Android NDK (r25c = 25.2.9519653 — minimum required by gomobile)
+# Android NDK (r25c = 25.2.9519653 — minimum required by gomobile) + a platform
+# so gomobile can find android.jar (gomobile bind needs the SDK, not just the NDK).
 RUN yes | sdkmanager --licenses > /dev/null 2>&1 || true \
-    && sdkmanager "ndk;${ANDROID_NDK_VERSION}"
+    && sdkmanager "ndk;${ANDROID_NDK_VERSION}" "platforms;android-35" "platform-tools"
 
 # gomobile — install and initialise against the NDK
 RUN go install golang.org/x/mobile/cmd/gomobile@latest \
@@ -65,7 +67,7 @@ RUN go mod download
 
 # Build — rebuild only when wgmodule source files change
 COPY wgmodule/ ./
-RUN ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}" \
+RUN mkdir -p /out && ANDROID_NDK_HOME="$ANDROID_HOME/ndk/${ANDROID_NDK_VERSION}" \
     gomobile bind \
         -target android \
         -androidapi 26 \

@@ -24,7 +24,14 @@ import java.net.InetAddress
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
-enum class TestFilter { ALL, HTTP_HTTPS, ICMP, DNS, STUN_TURN, XLAT_464 }
+// Each category is independently selectable (mirrors the web client's per-test
+// checkboxes) rather than a single mutually-exclusive filter.
+enum class TestCategory { HTTP_HTTPS, ICMP, DNS, STUN_TURN, WIREGUARD, XLAT_464 }
+
+// Mirrors the web client's "IP mode" radio group (auto/ipv4/ipv6) and the CLI's
+// --ipv4/--ipv6/--both flags: AUTO runs every family that resolves, the other
+// two restrict the whole run to a single family.
+enum class IpMode { AUTO, IPV4_ONLY, IPV6_ONLY }
 
 class DiagnosticRunner(
     private val context: Context,
@@ -35,18 +42,20 @@ class DiagnosticRunner(
 
     suspend fun runTests(
         endpoint: ServerEndpoint,
-        filter: TestFilter = TestFilter.ALL,
+        categories: Set<TestCategory> = TestCategory.entries.toSet(),
+        ipMode: IpMode = IpMode.AUTO,
     ): DiagnosticSession {
         val binder = CellularNetworkBinder(context)
         return binder.withCellularNetwork { network ->
-            executeTests(network, endpoint, filter)
+            executeTests(network, endpoint, categories, ipMode)
         }
     }
 
     private suspend fun executeTests(
         network: Network,
         endpoint: ServerEndpoint,
-        filter: TestFilter,
+        categories: Set<TestCategory>,
+        ipMode: IpMode = IpMode.AUTO,
     ): DiagnosticSession = coroutineScope {
         val (targetHost, customPort) = parseHostAndPort(endpoint.hostname)
         val turnTransport = context.getSharedPreferences("ipv6diag_prefs", Context.MODE_PRIVATE)
@@ -81,24 +90,27 @@ class DiagnosticRunner(
         )
 
         try {
-            // Resolve server addresses using system resolver
-            val ipv4Addr = resolveAddress(targetHost, isIPv6 = false)
-            val ipv6Addr = resolveAddress(targetHost, isIPv6 = true)
+            // Resolve server addresses using system resolver, honoring the selected IP mode.
+            val ipv4Addr = if (ipMode != IpMode.IPV6_ONLY) resolveAddress(targetHost, isIPv6 = false) else null
+            val ipv6Addr = if (ipMode != IpMode.IPV4_ONLY) resolveAddress(targetHost, isIPv6 = true) else null
 
-            // Run selected test types. Under ALL, run 464XLAT diagnostics whenever IPv6 is
-            // present — NAT64/DNS64/CLAT only apply on IPv6 networks, and CLAT detection is
-            // best-effort, so we must not gate the whole probe on clatPresent alone.
-            val runXlat = filter == TestFilter.XLAT_464 ||
-                (filter == TestFilter.ALL && (networkInfo.clatPresent || networkInfo.hasNativeIPv6))
-            val baseTypes = when (filter) {
-                TestFilter.ALL -> listOf(TestType.HTTP, TestType.HTTPS, TestType.ICMP, TestType.DNS, TestType.STUN, TestType.TURN, TestType.WIREGUARD)
-                TestFilter.HTTP_HTTPS -> listOf(TestType.HTTP, TestType.HTTPS)
-                TestFilter.ICMP -> listOf(TestType.ICMP)
-                TestFilter.DNS -> listOf(TestType.DNS)
-                TestFilter.STUN_TURN -> listOf(TestType.STUN, TestType.TURN)
-                TestFilter.XLAT_464 -> emptyList()
+            // Run every test type belonging to a selected category — each category is
+            // independent, so 464XLAT runs if and only if it's checked (no implicit
+            // network-hint heuristic, since there's no single "ALL" state anymore).
+            val runXlat = TestCategory.XLAT_464 in categories
+            val testTypes = buildList {
+                if (TestCategory.HTTP_HTTPS in categories) { add(TestType.HTTP); add(TestType.HTTPS) }
+                if (TestCategory.ICMP in categories) add(TestType.ICMP)
+                if (TestCategory.DNS in categories) add(TestType.DNS)
+                if (TestCategory.STUN_TURN in categories) { add(TestType.STUN); add(TestType.TURN) }
+                if (TestCategory.WIREGUARD in categories) add(TestType.WIREGUARD)
             }
-            val testTypes = baseTypes
+
+            // TURN needs authenticated credentials to Allocate a relay — fetch once up
+            // front and share across both address families, like the CLI does.
+            val turnCredentials = if (TestType.TURN in testTypes) {
+                fetchTurnCredentials(network, endpoint.baseUrl)
+            } else null
 
             for (testType in testTypes) {
                 if (networkChanged.get()) break
@@ -146,6 +158,7 @@ class DiagnosticRunner(
                                 messagesPerSecond = transferMessagesPerSecond,
                                 qualityThresholdRatio = transferQualityThreshold,
                                 transport = turnTransport,
+                                credentials = turnCredentials,
                             )
                         )
                         if (ipv6Addr != null) add(
@@ -160,6 +173,7 @@ class DiagnosticRunner(
                                 messagesPerSecond = transferMessagesPerSecond,
                                 qualityThresholdRatio = transferQualityThreshold,
                                 transport = turnTransport,
+                                credentials = turnCredentials,
                             )
                         )
                         if (isEmpty()) {
@@ -176,8 +190,10 @@ class DiagnosticRunner(
                         }
                     }
                     TestType.WIREGUARD -> buildList {
-                        val serverURL = "https://${targetHost}:${endpoint.httpsPort}"
-                        val token = "" // TODO: expose token from endpoint config
+                        // endpoint.baseUrl honors useHttps, unlike a hardcoded "https://" —
+                        // matters for local/HTTP-only deployments (e.g. docker-compose).
+                        val serverURL = endpoint.baseUrl
+                        val token = ""
                         if (ipv4Addr != null) add(
                             runWireGuardTest(network, sessionId, serverURL, token, AddressFamily.IPv4)
                         )
